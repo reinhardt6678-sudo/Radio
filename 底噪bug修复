@@ -1,0 +1,91 @@
+# KiwiSDR 信号监听系统 - 问题诊断与修复记录
+
+## 问题总结
+
+系统监听数小时未检测到任何信号。经过逐层排查，发现了 **协议解析** 和 **阈值配置** 两大类问题。
+
+---
+
+## 修复的问题
+
+### 1. 帧解析格式错误 (kiwi_client.py)
+
+对照官方 [jks-prv/kiwiclient](https://github.com/jks-prv/kiwiclient) 的实现：
+
+```python
+# 官方 kiwiclient (client.py 第220-223行)
+def _process_ws_message(self, message):
+    tag = bytearray2str(message[0:3])  # 前3字节是 tag: 'SND' 或 'MSG'
+    body = message[3:]                  # 第4字节起是 body
+    self._process_message(tag, body)
+```
+
+| 问题 | 原来的代码 | 正确格式 |
+|------|-----------|---------|
+| 帧标识 | `data[0]` = 'S' (1字节) | `data[0:3]` = 'SND' (3字节) |
+| flags | 无 | `body[0]` = flags |
+| 序列号 | `data[1:3]` | `body[1:3]` |
+| S-meter | `data[3:5]` | `body[3:5]` |
+| 音频PCM | `data[5:]` 或 `data[9:]` | `body[5:]` = `data[8:]` |
+
+### 2. 采样率参数不兼容
+
+```diff
+- SET AR OK in=12000 out=44100    # 许多节点不支持 44100
++ SET AR OK in=12000 out=12000    # KiwiSDR 原生采样率
+```
+
+### 3. 握手消息全是二进制
+
+KiwiSDR 所有消息（包括 `MSG client_public_ip` 等）都是以 **二进制** 发送的，不是文本字符串。原代码的 `isinstance(msg, str)` 分支永远不会被执行。
+
+### 4. 拒绝检查误报
+
+`_REJECT_KEYWORDS` 使用子串匹配 (`"admin" in msg`)，而 `load_cfg` 配置 JSON (18KB) 中包含 `"admin_password"` 等字段，导致所有节点都被误判为"服务器拒绝连接"。
+
+```diff
+- _REJECT_KEYWORDS = ["too_busy", "redirect", "down", "locked", "admin", ...]
+- if keyword in msg_text:  # 子串匹配 -> 误报!
++ _REJECT_MESSAGES = ["MSG too_busy", "MSG redirect", "MSG down", "MSG locked", ...]
++ if msg_text.startswith(reject_msg):  # 精确前缀匹配
+```
+
+### 5. 静噪阈值错误 (config.yaml) — **最致命的问题**
+
+> [!CAUTION]
+> 这是监听几小时没有信号的直接原因！
+
+实测 RMS 数据 (11175 kHz USB, 15秒, 333帧):
+
+| 指标 | 值 |
+|------|-----|
+| 底噪 RMS 均值 | **0.072** |
+| 底噪 RMS 最大值 | **0.104** |
+| 配置的 open_threshold | **0.65** ← 是底噪的 9 倍！ |
+| 高于阈值的帧数 | **0/333 (0%)** |
+
+```diff
+  squelch:
+-   open_threshold: 0.65     # 永远不会触发
+-   close_threshold: 0.61
++   open_threshold: 0.15     # 底噪的 2 倍，能检测到真正的语音信号
++   close_threshold: 0.13
+```
+
+---
+
+## 开源参考资料
+
+| 项目 | 说明 | 链接 |
+|------|------|------|
+| **kiwiclient** | 官方 KiwiSDR Python 客户端 (kiwirecorder) | [github.com/jks-prv/kiwiclient](https://github.com/jks-prv/kiwiclient) |
+| `client.py` | WebSocket 协议实现、帧解析、ADPCM 解码 | [client.py](https://github.com/jks-prv/kiwiclient/blob/master/kiwi/client.py) |
+| `kiwirecorder.py` | 完整的录音/监听示例 | [kiwirecorder.py](https://github.com/jks-prv/kiwiclient/blob/master/kiwirecorder.py) |
+| KiwiSDR 源码 | 服务器端实现 | [github.com/jks-prv/Beagle_SDR_GPS](https://github.com/jks-prv/Beagle_SDR_GPS) |
+
+---
+
+## 修改的文件
+
+- [kiwi_client.py](file:///c:/Users/xiexiaokai/Documents/无线电/src/kiwi_client.py) — 帧解析、握手、拒绝检查
+- [config.yaml](file:///c:/Users/xiexiaokai/Documents/无线电/config.yaml) — 静噪阈值

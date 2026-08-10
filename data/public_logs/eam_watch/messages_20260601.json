@@ -1,0 +1,436 @@
+[
+  {
+    "id": "912ca68c-37fe-4a4c-a6f4-32f760155aae",
+    "type": "ALLSTATIONS",
+    "sender": "SHORTHAND",
+    "receiver": "",
+    "time": "2026-06-01 15:07:00",
+    "message": "CBVN2JRPNDH5D25YZZ6KUHJULNOOMM",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "72ffabe0-6de0-4eda-8132-2b6e5ad91865",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/912ca68c-37fe-4a4c-a6f4-32f760155aae/72ffabe0-6de0-4eda-8132-2b6e5ad91865"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "d2a83e38-93cb-4cb0-8849-7303be6ddade",
+    "type": "ALLSTATIONS",
+    "sender": "SHORTHAND",
+    "receiver": "",
+    "time": "2026-06-01 15:05:00",
+    "message": "CB46J2AGZHLNHFLBWYIUPQPDP3HNEV",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "e403722f-3471-460d-8cb5-6e0d5561c10f",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/d2a83e38-93cb-4cb0-8849-7303be6ddade/e403722f-3471-460d-8cb5-6e0d5561c10f"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "05d9daaa-56cf-4a3e-abf6-c14428a2499c",
+    "type": "ALLSTATIONS",
+    "sender": "SHORTHAND",
+    "receiver": "",
+    "time": "2026-06-01 15:03:00",
+    "message": "CB6WD7ZWDJSXGKCJWLHJUU3MFS2DCR",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "3d123902-8820-472d-be83-522d00eae29f",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/05d9daaa-56cf-4a3e-abf6-c14428a2499c/3d123902-8820-472d-be83-522d00eae29f"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "2062b4ee-2eae-4214-b00c-ea52ac6dff5b",
+    "type": "ALLSTATIONS",
+    "sender": "SHORTHAND",
+    "receiver": "",
+    "time": "2026-06-01 15:01:00",
+    "message": "CBRB57RFFFEVJI2T5HULTDXWJH7LU6",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "1674acfd-f4d7-40b7-9baf-a75782b6feff",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/2062b4ee-2eae-4214-b00c-ea52ac6dff5b/1674acfd-f4d7-40b7-9baf-a75782b6feff"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "ccceed20-47f7-42bc-b1ad-8730ca7d87bf",
+    "type": "DISREGARDED",
+    "sender": "SHORTHAND",
+    "receiver": "",
+    "time": "2026-06-01 15:00:00",
+    "message": "CB46J2 DISREGARD THIS TRANSMISSION THIS IS SHORTHAND OUT",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "39fbfaa4-3fd0-4b4b-ad70-5364d2a7da7b",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/ccceed20-47f7-42bc-b1ad-8730ca7d87bf/39fbfaa4-3fd0-4b4b-ad70-5364d2a7da7b"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "503c736f-2aca-4ab1-951c-57c0200effa2",
+    "type": "ALLSTATIONS",
+    "sender": "SHORTHAND?",
+    "receiver": "",
+    "time": "2026-06-01 14:39:00",
+    "message": "ZLUKOEVVHW62JI2STGR7COXK7PE",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "8b03d365-bd3b-47bd-8cb5-b6df7f663ad0",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/503c736f-2aca-4ab1-951c-57c0200effa2/8b03d365-bd3b-47bd-8cb5-b6df7f663ad0"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "fe4c42bd-23df-4dd2-9b47-16504590c59a",
+    "type": "ALLSTATIONS",
+    "sender": "SHORTHAND?",
+    "receiver": "",
+    "time": "2026-06-01 14:36:00",
+    "message": "CB46J2AGZHLNHFLBWYIUAQODA3HNEJ",
+    "comment_count": 0,
+    "recording_count": 0,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "a9bbc855-a97d-40e4-8e00-42a1fb46b8b6",
+    "type": "ALLSTATIONS",
+    "sender": "UNREADABLE",
+    "receiver": "",
+    "time": "2026-06-01 14:34:00",
+    "message": "CBVN2JRONDH5D25YZZ6KUHJULNOOMM",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "b3ec1f64-6a5a-4c13-bb91-57d514ff281b",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/a9bbc855-a97d-40e4-8e00-42a1fb46b8b6/b3ec1f64-6a5a-4c13-bb91-57d514ff281b"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "799849c6-f1a9-4120-ad81-3b19abb6b00a",
+    "type": "ALLSTATIONS",
+    "sender": "DRY SAND",
+    "receiver": "",
+    "time": "2026-05-31 22:06:00",
+    "message": "CBNDLEUGANLHFCIMJJUPOYDWU6RQCK",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "11803346-526a-44d6-b0c0-f6ef71d9311e",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/799849c6-f1a9-4120-ad81-3b19abb6b00a/11803346-526a-44d6-b0c0-f6ef71d9311e"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0
+  },
+  {
+    "id": "aabc21a4-a1be-4339-8ca4-e6b845d4c600",
+    "type": "ALLSTATIONS",
+    "sender": "DRY SAND",
+    "receiver": "",
+    "time": "2026-05-31 22:04:00",
+    "message": "CB552YCPN4VTNH66ARXLNCWQ2O63SY",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "6e433e88-7634-4c52-9872-2c4d0e20df46",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/aabc21a4-a1be-4339-8ca4-e6b845d4c600/6e433e88-7634-4c52-9872-2c4d0e20df46"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 1
+  },
+  {
+    "id": "65c3fa44-36e7-41e2-bf4a-03c7f56880b3",
+    "type": "ALLSTATIONS",
+    "sender": "DRY SAND",
+    "receiver": "",
+    "time": "2026-05-31 22:02:00",
+    "message": "CBG4AKVNZPSORHRHEWAVQ4VV4EODSH",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "ccb8209b-a135-4f5a-b122-70851ba938a3",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/65c3fa44-36e7-41e2-bf4a-03c7f56880b3/ccb8209b-a135-4f5a-b122-70851ba938a3"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 1
+  },
+  {
+    "id": "a2416b7d-bdb1-4823-a21e-dd6f7fd69e6b",
+    "type": "ALLSTATIONS",
+    "sender": "DRY SAND",
+    "receiver": "",
+    "time": "2026-05-31 22:00:00",
+    "message": "CBEAAL2WU7GLS64TZVHMIIJAQKJDTF",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "1e4c4fd6-d638-4129-961d-21308e88b4dc",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/a2416b7d-bdb1-4823-a21e-dd6f7fd69e6b/1e4c4fd6-d638-4129-961d-21308e88b4dc"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 1,
+    "local_audio_path": "C:\\Users\\xiexiaokai\\Documents\\无线电\\data\\public_logs\\eam_watch\\audio\\1e4c4fd6-d638-4129-961d-21308e88b4dc"
+  },
+  {
+    "id": "6d92373f-cf96-4c8e-beb4-578d97041442",
+    "type": "ALLSTATIONS",
+    "sender": "DRY SAND",
+    "receiver": "",
+    "time": "2026-05-31 21:53:00",
+    "message": "CBEAAL2WU7GLS64TZVHMIIJAQKJDTF",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "59d4c469-70d4-4571-b468-3d547e1033e3",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/6d92373f-cf96-4c8e-beb4-578d97041442/59d4c469-70d4-4571-b468-3d547e1033e3"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0,
+    "local_audio_path": "C:\\Users\\xiexiaokai\\Documents\\无线电\\data\\public_logs\\eam_watch\\audio\\59d4c469-70d4-4571-b468-3d547e1033e3"
+  },
+  {
+    "id": "afa3f124-39dd-44c7-b636-7354442ad97d",
+    "type": "ALLSTATIONS",
+    "sender": "DRY SAND",
+    "receiver": "",
+    "time": "2026-05-31 21:50:00",
+    "message": "CBG4AKVNZPSORHRHEWAVQ4VV4EODSH",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "18399c7f-52b8-410f-9c0e-9bc776fddd26",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/afa3f124-39dd-44c7-b636-7354442ad97d/18399c7f-52b8-410f-9c0e-9bc776fddd26"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0,
+    "local_audio_path": "C:\\Users\\xiexiaokai\\Documents\\无线电\\data\\public_logs\\eam_watch\\audio\\18399c7f-52b8-410f-9c0e-9bc776fddd26"
+  },
+  {
+    "id": "9bfbccb2-28a1-44ff-a767-0c34117af68e",
+    "type": "ALLSTATIONS",
+    "sender": "DRY SAND",
+    "receiver": "",
+    "time": "2026-05-31 21:47:00",
+    "message": "CB552YCPN4VTNH66ARXLNCWQ2O63SY",
+    "comment_count": 0,
+    "recording_count": 1,
+    "rating": null,
+    "user": {
+      "name": "The Hairy Lemon",
+      "id": "9b308562-bbbf-42c4-b43a-cf9346176fd7",
+      "type": "user"
+    },
+    "comments": [],
+    "recordings": [
+      {
+        "id": "45f9788a-beab-4a98-b8c3-7a537c246007",
+        "link": "https://eamwatch-production.s3.amazonaws.com/recordings/9bfbccb2-28a1-44ff-a767-0c34117af68e/45f9788a-beab-4a98-b8c3-7a537c246007"
+      }
+    ],
+    "automated_recordings": [],
+    "permissions": {
+      "update": false,
+      "delete": false
+    },
+    "repeats": 0,
+    "local_audio_path": "C:\\Users\\xiexiaokai\\Documents\\无线电\\data\\public_logs\\eam_watch\\audio\\45f9788a-beab-4a98-b8c3-7a537c246007"
+  }
+]

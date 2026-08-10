@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>军事无线电信号分析报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid #21262d;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #58a6ff, #bc8cff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .subtitle { color: #8b949e; margin-top: 8px; font-size: 14px; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .stat-card .label { color: #8b949e; font-size: 13px; margin-top: 4px; }
+        .section {
+            margin-bottom: 30px;
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #21262d;
+        }
+        .chart-img {
+            width: 100%;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #21262d;
+        }
+        th { color: #8b949e; font-weight: 600; }
+        tr:hover { background: rgba(88,166,255,0.05); }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-active { background: rgba(63,185,80,0.2); color: #3fb950; }
+        .badge-mod { background: rgba(188,140,255,0.2); color: #bc8cff; }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #8b949e;
+            font-size: 12px;
+            border-top: 1px solid #21262d;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📻 军事无线电信号分析报告</h1>
+            <div class="subtitle">
+                生成时间: 2026-06-01 03:50 UTC |
+                统计范围: 最近 7 天
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">0</div>
+                <div class="label">检测到的信号总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">0s</div>
+                <div class="label">信号总时长</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">0</div>
+                <div class="label">活跃频率数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">2</div>
+                <div class="label">监听会话数</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            MilRadio Signal Analyzer v1.0 | 仅供无线电爱好者合法监听使用
+        </div>
+    </div>
+</body>
+</html>

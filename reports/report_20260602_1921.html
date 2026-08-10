@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>军事无线电信号分析报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid #21262d;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #58a6ff, #bc8cff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .subtitle { color: #8b949e; margin-top: 8px; font-size: 14px; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .stat-card .label { color: #8b949e; font-size: 13px; margin-top: 4px; }
+        .section {
+            margin-bottom: 30px;
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #21262d;
+        }
+        .chart-img {
+            width: 100%;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #21262d;
+        }
+        th { color: #8b949e; font-weight: 600; }
+        tr:hover { background: rgba(88,166,255,0.05); }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-active { background: rgba(63,185,80,0.2); color: #3fb950; }
+        .badge-mod { background: rgba(188,140,255,0.2); color: #bc8cff; }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #8b949e;
+            font-size: 12px;
+            border-top: 1px solid #21262d;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📻 军事无线电信号分析报告</h1>
+            <div class="subtitle">
+                生成时间: 2026-06-02 19:21 UTC |
+                统计范围: 最近 7 天
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">51</div>
+                <div class="label">检测到的信号总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">387s</div>
+                <div class="label">信号总时长</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">1</div>
+                <div class="label">活跃频率数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">19</div>
+                <div class="label">监听会话数</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📊 频率活跃度排名</h2>
+            <img class="chart-img" src="chart_freq_activity.png" alt="频率活跃度排名">
+        </div>
+
+        <div class="section">
+            <h2>📊 24 小时活动分布</h2>
+            <img class="chart-img" src="chart_hourly.png" alt="24 小时活动分布">
+        </div>
+
+        <div class="section">
+            <h2>📊 信号强度分布</h2>
+            <img class="chart-img" src="chart_signal_strength.png" alt="信号强度分布">
+        </div>
+
+        <div class="section">
+            <h2>📊 信号时间线</h2>
+            <img class="chart-img" src="chart_timeline.png" alt="信号时间线">
+        </div>
+
+        <div class="section">
+            <h2>📋 频率活跃度统计</h2>
+            <table>
+                <tr>
+                    <th>频率 (kHz)</th><th>模式</th><th>网络</th>
+                    <th>信号数</th><th>总时长</th><th>平均时长</th>
+                    <th>平均峰值 RMS</th>
+                </tr>
+
+                <tr>
+                    <td><strong>8992.0</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>-</td>
+                    <td>51</td>
+                    <td>386.6s</td>
+                    <td>7.6s</td>
+                    <td>0.1616</td>
+                </tr>
+
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>📡 最近检测到的信号</h2>
+            <table>
+                <tr>
+                    <th>时间 (UTC)</th><th>频率</th><th>模式</th>
+                    <th>节点</th><th>时长</th><th>峰值 RMS</th>
+                    <th>录音文件</th>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T18:47:46</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.2075</td>
+                    <td style="font-size:11px">20260602_184743_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T18:28:03</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1693</td>
+                    <td style="font-size:11px">20260602_182800_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T18:22:09</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1569</td>
+                    <td style="font-size:11px">20260602_182206_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:29:22</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>21.2s</td>
+                    <td>0.1711</td>
+                    <td style="font-size:11px">20260602_162901_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:28:59</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.1s</td>
+                    <td>0.1863</td>
+                    <td style="font-size:11px">20260602_162856_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:28:51</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1515</td>
+                    <td style="font-size:11px">20260602_162848_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:27:35</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>5.0s</td>
+                    <td>0.1724</td>
+                    <td style="font-size:11px">20260602_162729_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:27:27</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>15.2s</td>
+                    <td>0.1711</td>
+                    <td style="font-size:11px">20260602_162712_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:27:09</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.6s</td>
+                    <td>0.1656</td>
+                    <td style="font-size:11px">20260602_162706_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:19:58</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>27.8s</td>
+                    <td>0.1990</td>
+                    <td style="font-size:11px">20260602_161930_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:19:30</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1543</td>
+                    <td style="font-size:11px">20260602_161927_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T16:19:23</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1553</td>
+                    <td style="font-size:11px">20260602_161920_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T12:22:15</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1554</td>
+                    <td style="font-size:11px">20260602_122212_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T09:14:34</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1578</td>
+                    <td style="font-size:11px">20260602_091431_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:39:14</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.4s</td>
+                    <td>0.1502</td>
+                    <td style="font-size:11px">20260602_073910_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:38:05</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.9s</td>
+                    <td>0.1546</td>
+                    <td style="font-size:11px">20260602_073801_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:37:59</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>8.0s</td>
+                    <td>0.1578</td>
+                    <td style="font-size:11px">20260602_073751_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:37:04</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>6.2s</td>
+                    <td>0.1596</td>
+                    <td style="font-size:11px">20260602_073658_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:34:43</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>17.0s</td>
+                    <td>0.1661</td>
+                    <td style="font-size:11px">20260602_073426_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:33:19</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1500</td>
+                    <td style="font-size:11px">20260602_073316_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:33:11</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>4.8s</td>
+                    <td>0.1525</td>
+                    <td style="font-size:11px">20260602_073306_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:32:45</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.1s</td>
+                    <td>0.1522</td>
+                    <td style="font-size:11px">20260602_073242_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:12:13</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>18.2s</td>
+                    <td>0.1629</td>
+                    <td style="font-size:11px">20260602_071155_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:11:28</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>7.8s</td>
+                    <td>0.1528</td>
+                    <td style="font-size:11px">20260602_071120_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:11:14</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>12.5s</td>
+                    <td>0.1510</td>
+                    <td style="font-size:11px">20260602_071101_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:10:57</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>15.0s</td>
+                    <td>0.1575</td>
+                    <td style="font-size:11px">20260602_071042_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:10:41</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>10.8s</td>
+                    <td>0.1731</td>
+                    <td style="font-size:11px">20260602_071030_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:10:13</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.4s</td>
+                    <td>0.1539</td>
+                    <td style="font-size:11px">20260602_071009_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T07:10:01</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>5.7s</td>
+                    <td>0.1599</td>
+                    <td style="font-size:11px">20260602_070955_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:22:36</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1640</td>
+                    <td style="font-size:11px">20260602_042233_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:12:19</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.2s</td>
+                    <td>0.1551</td>
+                    <td style="font-size:11px">20260602_041216_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:12:13</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.2s</td>
+                    <td>0.1525</td>
+                    <td style="font-size:11px">20260602_041210_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:11:57</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>4.7s</td>
+                    <td>0.1526</td>
+                    <td style="font-size:11px">20260602_041152_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:11:33</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.1s</td>
+                    <td>0.1527</td>
+                    <td style="font-size:11px">20260602_041130_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:11:00</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>4.6s</td>
+                    <td>0.1545</td>
+                    <td style="font-size:11px">20260602_041055_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:10:21</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>5.8s</td>
+                    <td>0.1733</td>
+                    <td style="font-size:11px">20260602_041015_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T04:10:08</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>8.6s</td>
+                    <td>0.1523</td>
+                    <td style="font-size:11px">20260602_041000_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T03:58:36</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1618</td>
+                    <td style="font-size:11px">20260602_035833_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T03:58:16</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.0s</td>
+                    <td>0.1751</td>
+                    <td style="font-size:11px">20260602_035813_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T03:40:35</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>7.8s</td>
+                    <td>0.1606</td>
+                    <td style="font-size:11px">20260602_034027_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T03:40:08</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>6.3s</td>
+                    <td>0.1616</td>
+                    <td style="font-size:11px">20260602_034002_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:47:21</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>5.6s</td>
+                    <td>0.1510</td>
+                    <td style="font-size:11px">20260602_024716_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:42:35</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>22.4s</td>
+                    <td>0.1592</td>
+                    <td style="font-size:11px">20260602_024213_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:40:10</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>10.1s</td>
+                    <td>0.1615</td>
+                    <td style="font-size:11px">20260602_023959_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:24:17</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>6.3s</td>
+                    <td>0.1541</td>
+                    <td style="font-size:11px">20260602_022411_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:04:41</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>8.4s</td>
+                    <td>0.1552</td>
+                    <td style="font-size:11px">20260602_020432_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:04:28</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>7.0s</td>
+                    <td>0.1530</td>
+                    <td style="font-size:11px">20260602_020421_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:03:26</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>3.2s</td>
+                    <td>0.1624</td>
+                    <td style="font-size:11px">20260602_020323_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:03:18</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>8.2s</td>
+                    <td>0.1961</td>
+                    <td style="font-size:11px">20260602_020309_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-02T02:03:09</td>
+                    <td><strong>8992.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>Great Lakes Michigan</td>
+                    <td>13.1s</td>
+                    <td>0.1509</td>
+                    <td style="font-size:11px">20260602_020256_8992.0kHz_Great_Lakes_Michigan.wav</td>
+                </tr>
+
+            </table>
+        </div>
+
+        <div class="footer">
+            MilRadio Signal Analyzer v1.0 | 仅供无线电爱好者合法监听使用
+        </div>
+    </div>
+</body>
+</html>

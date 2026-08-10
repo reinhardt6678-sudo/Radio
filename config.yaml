@@ -1,0 +1,127 @@
+# ============================================================
+# 军事无线电信号接收系统 - 主配置文件
+# ============================================================
+
+# --- KiwiSDR 公共节点列表 ---
+# 每个节点包含: host, port, name, location, max_freq_khz
+# 这些是公开可用的 KiwiSDR 接收节点
+nodes:
+  # --- 以下节点于 2026-06-01 从 rx.linkfanel.net 验证在线 ---
+
+  - host: "sdr.ironstonerange.com"
+    port: 8075
+    name: "VK5PH SDR3 Australia"
+    location: "South Australia"
+    lat: -34.96
+    lon: 138.76
+
+  - host: "kphsdr.com"
+    port: 8073
+    name: "KPH California"
+    location: "California, USA"
+    lat: 38.10
+    lon: -122.95
+
+  - host: "g3sdr.com"
+    port: 8073
+    name: "G3SDR UK"
+    location: "United Kingdom"
+    lat: 51.32
+    lon: -2.95
+
+  - host: "la6lukiwisdrth.ddns.net"
+    port: 8073
+    name: "LA6LU Thailand"
+    location: "Thailand"
+    lat: 12.79
+    lon: 99.97
+
+  - host: "sdr.k1vl.com"
+    port: 8073
+    name: "K1VL Vermont USA"
+    location: "Vermont, USA"
+    lat: 43.51
+    lon: -72.82
+
+  - host: "114.16.17.147"
+    port: 8073
+    name: "Minowa Japan"
+    location: "Nagano, Japan"
+    lat: 35.91
+    lon: 137.98
+
+  - host: "178.237.95.113"
+    port: 8073
+    name: "HB3YQQ Switzerland"
+    location: "Switzerland"
+    lat: 46.27
+    lon: 6.85
+
+  - host: "greatlakesreceiver.hopto.me"
+    port: 8073
+    name: "Great Lakes Michigan"
+    location: "Michigan, USA"
+    lat: 43.23
+    lon: -86.25
+
+# --- 接收参数 ---
+receiver:
+  # 并发连接数上限 (每个连接占用一个 KiwiSDR 通道)
+  max_concurrent: 2
+  # 每个频率的监听时长 (秒), 0 = 无限
+  listen_duration: 0
+  # 频率扫描模式下每个频率的停留时间 (秒)
+  scan_dwell_time: 30
+  # 音频采样率 (KiwiSDR 默认 12000 Hz)
+  sample_rate: 12000
+  # 音频带宽 (Hz)
+  bandwidth: 6000
+
+# --- 静噪 (VOX) 设置 ---
+# 实测: KiwiSDR 在 11175 kHz USB 的底噪 RMS 约 0.04~0.05
+# EAM 信号峰值 RMS 通常在 0.12~0.23 范围
+# 2026-06-09: 经 EAM.watch 录音对比，0.15 阈值漏掉 75% 信号，降至 0.10
+squelch:
+  # 静噪开启阈值 (RMS 能量, 0-1 范围)
+  # EAM.watch 对比: 0.10 检测率 100%, 0.15 仅 25%
+  open_threshold: 0.10
+  # 静噪关闭阈值 (约 open 的 85%，形成滞后防止频繁切换)
+  close_threshold: 0.085
+  # 信号消失后继续录制的延迟 (秒), 防止截断信号尾部
+  tail_time: 3.0
+  # 分析窗口大小 (采样点数)
+  window_size: 1024
+
+# --- 录制设置 ---
+recording:
+  # 录音文件输出目录
+  output_dir: "data/recordings"
+  # 最长单段录音时长 (秒), 超过后自动分段
+  max_duration: 300
+  # WAV 文件位深 (16 或 32)
+  bit_depth: 16
+  # pre-roll 缓冲 (秒), 保留信号开始前的音频
+  pre_roll: 2.0
+
+# --- 数据库设置 ---
+database:
+  path: "data/radio_monitor.db"
+
+# --- 分析设置 ---
+analysis:
+  # FFT 大小
+  fft_size: 4096
+  # 频谱分析窗口类型: hann, hamming, blackman
+  window_type: "hann"
+  # 信号带宽估算阈值 (dB below peak)
+  bandwidth_threshold_db: 20
+
+# --- 报告设置 ---
+report:
+  output_dir: "reports"
+  # 报告包含的最近天数
+  recent_days: 7
+  # 图表 DPI
+  chart_dpi: 150
+  # 图表主题: dark, light
+  chart_theme: "dark"

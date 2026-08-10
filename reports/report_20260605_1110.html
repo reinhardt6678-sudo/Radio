@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>军事无线电信号分析报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid #21262d;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #58a6ff, #bc8cff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .subtitle { color: #8b949e; margin-top: 8px; font-size: 14px; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .stat-card .label { color: #8b949e; font-size: 13px; margin-top: 4px; }
+        .section {
+            margin-bottom: 30px;
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #21262d;
+        }
+        .chart-img {
+            width: 100%;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #21262d;
+        }
+        th { color: #8b949e; font-weight: 600; }
+        tr:hover { background: rgba(88,166,255,0.05); }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-active { background: rgba(63,185,80,0.2); color: #3fb950; }
+        .badge-mod { background: rgba(188,140,255,0.2); color: #bc8cff; }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #8b949e;
+            font-size: 12px;
+            border-top: 1px solid #21262d;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📻 军事无线电信号分析报告</h1>
+            <div class="subtitle">
+                生成时间: 2026-06-05 11:10 UTC |
+                统计范围: 最近 7 天
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">500</div>
+                <div class="label">检测到的信号总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">4210s</div>
+                <div class="label">信号总时长</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">1</div>
+                <div class="label">活跃频率数</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">26</div>
+                <div class="label">监听会话数</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📊 频率活跃度排名</h2>
+            <img class="chart-img" src="chart_freq_activity.png" alt="频率活跃度排名">
+        </div>
+
+        <div class="section">
+            <h2>📊 24 小时活动分布</h2>
+            <img class="chart-img" src="chart_hourly.png" alt="24 小时活动分布">
+        </div>
+
+        <div class="section">
+            <h2>📊 信号强度分布</h2>
+            <img class="chart-img" src="chart_signal_strength.png" alt="信号强度分布">
+        </div>
+
+        <div class="section">
+            <h2>📊 信号时间线</h2>
+            <img class="chart-img" src="chart_timeline.png" alt="信号时间线">
+        </div>
+
+        <div class="section">
+            <h2>📊 调制类型分布</h2>
+            <img class="chart-img" src="chart_modulation.png" alt="调制类型分布">
+        </div>
+
+        <div class="section">
+            <h2>📊 SNR 与带宽关联分析</h2>
+            <img class="chart-img" src="chart_snr_bandwidth.png" alt="SNR 与带宽关联分析">
+        </div>
+
+        <div class="section">
+            <h2>📊 信号时长分布</h2>
+            <img class="chart-img" src="chart_duration.png" alt="信号时长分布">
+        </div>
+
+        <div class="section">
+            <h2>📊 网络/频段活动对比</h2>
+            <img class="chart-img" src="chart_network.png" alt="网络/频段活动对比">
+        </div>
+
+        <div class="section">
+            <h2>📊 综合分析概览</h2>
+            <img class="chart-img" src="chart_dashboard.png" alt="综合分析概览">
+        </div>
+
+        <div class="section">
+            <h2>📋 频率活跃度统计</h2>
+            <table>
+                <tr>
+                    <th>频率 (kHz)</th><th>模式</th><th>网络</th>
+                    <th>信号数</th><th>总时长</th><th>平均时长</th>
+                    <th>平均峰值 RMS</th>
+                </tr>
+
+                <tr>
+                    <td><strong>11175.0</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>-</td>
+                    <td>676</td>
+                    <td>4858.1s</td>
+                    <td>7.2s</td>
+                    <td>0.1698</td>
+                </tr>
+
+                <tr>
+                    <td><strong>8992.0</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>-</td>
+                    <td>63</td>
+                    <td>456.7s</td>
+                    <td>7.2s</td>
+                    <td>0.1615</td>
+                </tr>
+
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>📡 最近检测到的信号</h2>
+            <table>
+                <tr>
+                    <th>时间 (UTC)</th><th>频率</th><th>模式</th>
+                    <th>节点</th><th>时长</th><th>峰值 RMS</th>
+                    <th>录音文件</th>
+                </tr>
+
+                <tr>
+                    <td>2026-06-05T00:42:51</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>K1VL Vermont USA</td>
+                    <td>3.1s</td>
+                    <td>0.2015</td>
+                    <td style="font-size:11px">20260605_004247_11175.0kHz_K1VL_Vermont_USA.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-05T00:42:00</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>K1VL Vermont USA</td>
+                    <td>4.6s</td>
+                    <td>0.1667</td>
+                    <td style="font-size:11px">20260605_004155_11175.0kHz_K1VL_Vermont_USA.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-05T00:34:44</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>K1VL Vermont USA</td>
+                    <td>3.0s</td>
+                    <td>0.1567</td>
+                    <td style="font-size:11px">20260605_003441_11175.0kHz_K1VL_Vermont_USA.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:46:24</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.0s</td>
+                    <td>0.1951</td>
+                    <td style="font-size:11px">20260604_164621_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:27:19</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>6.0s</td>
+                    <td>0.1557</td>
+                    <td style="font-size:11px">20260604_162713_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:27:10</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>4.0s</td>
+                    <td>0.1561</td>
+                    <td style="font-size:11px">20260604_162706_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:25:55</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>7.1s</td>
+                    <td>0.1729</td>
+                    <td style="font-size:11px">20260604_162548_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:25:15</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>5.9s</td>
+                    <td>0.1674</td>
+                    <td style="font-size:11px">20260604_162509_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:24:46</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.7s</td>
+                    <td>0.1734</td>
+                    <td style="font-size:11px">20260604_162442_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:24:38</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>13.3s</td>
+                    <td>0.1544</td>
+                    <td style="font-size:11px">20260604_162425_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:23:51</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.1s</td>
+                    <td>0.1565</td>
+                    <td style="font-size:11px">20260604_162348_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:23:29</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>8.7s</td>
+                    <td>0.1874</td>
+                    <td style="font-size:11px">20260604_162320_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:23:02</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.4s</td>
+                    <td>0.1537</td>
+                    <td style="font-size:11px">20260604_162259_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:22:38</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>6.0s</td>
+                    <td>0.1775</td>
+                    <td style="font-size:11px">20260604_162232_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:22:15</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>4.6s</td>
+                    <td>0.1569</td>
+                    <td style="font-size:11px">20260604_162211_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:16:24</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.1s</td>
+                    <td>0.1604</td>
+                    <td style="font-size:11px">20260604_161621_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:12:59</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.0s</td>
+                    <td>0.1892</td>
+                    <td style="font-size:11px">20260604_161256_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:10:37</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.1s</td>
+                    <td>0.1503</td>
+                    <td style="font-size:11px">20260604_161034_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:08:55</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.0s</td>
+                    <td>0.1845</td>
+                    <td style="font-size:11px">20260604_160852_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:06:06</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.0s</td>
+                    <td>0.1573</td>
+                    <td style="font-size:11px">20260604_160603_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:04:17</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.0s</td>
+                    <td>0.1552</td>
+                    <td style="font-size:11px">20260604_160414_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:03:39</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.2s</td>
+                    <td>0.1502</td>
+                    <td style="font-size:11px">20260604_160336_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T16:01:25</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.9s</td>
+                    <td>0.1834</td>
+                    <td style="font-size:11px">20260604_160121_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:57:59</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.7s</td>
+                    <td>0.1670</td>
+                    <td style="font-size:11px">20260604_155755_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:56:43</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>5.1s</td>
+                    <td>0.1604</td>
+                    <td style="font-size:11px">20260604_155638_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:56:23</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>5.0s</td>
+                    <td>0.1525</td>
+                    <td style="font-size:11px">20260604_155618_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:56:06</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>5.9s</td>
+                    <td>0.1692</td>
+                    <td style="font-size:11px">20260604_155600_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:55:33</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.1s</td>
+                    <td>0.1502</td>
+                    <td style="font-size:11px">20260604_155530_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:54:51</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>6.0s</td>
+                    <td>0.1597</td>
+                    <td style="font-size:11px">20260604_155445_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:54:32</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>4.9s</td>
+                    <td>0.1628</td>
+                    <td style="font-size:11px">20260604_155427_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:53:58</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>29.5s</td>
+                    <td>0.1866</td>
+                    <td style="font-size:11px">20260604_155329_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:53:01</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>16.8s</td>
+                    <td>0.1553</td>
+                    <td style="font-size:11px">20260604_155244_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:52:43</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.8s</td>
+                    <td>0.1571</td>
+                    <td style="font-size:11px">20260604_155239_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:52:34</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>21.4s</td>
+                    <td>0.2179</td>
+                    <td style="font-size:11px">20260604_155213_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:51:42</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>13.4s</td>
+                    <td>0.1633</td>
+                    <td style="font-size:11px">20260604_155128_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:50:46</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>11.9s</td>
+                    <td>0.1659</td>
+                    <td style="font-size:11px">20260604_155034_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:50:28</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.2s</td>
+                    <td>0.1522</td>
+                    <td style="font-size:11px">20260604_155025_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:49:45</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>9.9s</td>
+                    <td>0.1553</td>
+                    <td style="font-size:11px">20260604_154935_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:49:29</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.0s</td>
+                    <td>0.1622</td>
+                    <td style="font-size:11px">20260604_154926_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:49:18</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>8.8s</td>
+                    <td>0.1585</td>
+                    <td style="font-size:11px">20260604_154910_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:49:05</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>8.5s</td>
+                    <td>0.1739</td>
+                    <td style="font-size:11px">20260604_154857_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:48:23</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.5s</td>
+                    <td>0.1512</td>
+                    <td style="font-size:11px">20260604_154820_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:47:42</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.2s</td>
+                    <td>0.1546</td>
+                    <td style="font-size:11px">20260604_154739_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:45:08</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>9.2s</td>
+                    <td>0.1553</td>
+                    <td style="font-size:11px">20260604_154459_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:44:56</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>8.0s</td>
+                    <td>0.1534</td>
+                    <td style="font-size:11px">20260604_154448_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:44:43</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>46.1s</td>
+                    <td>0.1614</td>
+                    <td style="font-size:11px">20260604_154357_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:43:52</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>23.0s</td>
+                    <td>0.1586</td>
+                    <td style="font-size:11px">20260604_154329_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:43:26</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>9.6s</td>
+                    <td>0.1510</td>
+                    <td style="font-size:11px">20260604_154317_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:43:09</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>3.5s</td>
+                    <td>0.1542</td>
+                    <td style="font-size:11px">20260604_154306_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+                <tr>
+                    <td>2026-06-04T15:43:05</td>
+                    <td><strong>11175.0 kHz</strong></td>
+                    <td><span class="badge badge-mod">USB</span></td>
+                    <td>KPH California</td>
+                    <td>9.8s</td>
+                    <td>0.1593</td>
+                    <td style="font-size:11px">20260604_154255_11175.0kHz_KPH_California.wav</td>
+                </tr>
+
+            </table>
+        </div>
+
+        <div class="footer">
+            MilRadio Signal Analyzer v1.0 | 仅供无线电爱好者合法监听使用
+        </div>
+    </div>
+</body>
+</html>

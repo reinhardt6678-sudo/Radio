@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MilRadio - Military Radio Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: #1a2035;
+            --bg-card-hover: #1e2640;
+            --border: #2a3550;
+            --text: #e2e8f0;
+            --text-dim: #718096;
+            --text-bright: #f7fafc;
+            --accent: #60a5fa;
+            --accent-glow: rgba(96, 165, 250, 0.3);
+            --green: #34d399;
+            --green-dim: rgba(52, 211, 153, 0.15);
+            --red: #f87171;
+            --red-dim: rgba(248, 113, 113, 0.15);
+            --yellow: #fbbf24;
+            --purple: #a78bfa;
+            --cyan: #22d3ee;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            background: linear-gradient(135deg, #0f1729 0%, #1a1f3a 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(12px);
+        }
+
+        .header .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; font-weight: 700; color: white;
+        }
+
+        .logo-text {
+            font-size: 18px; font-weight: 700;
+            background: linear-gradient(90deg, var(--accent), var(--purple));
+            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+        }
+
+        .logo-sub { font-size: 11px; color: var(--text-dim); }
+
+        .header-status {
+            display: flex; align-items: center; gap: 16px;
+        }
+
+        .status-pill {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 14px; border-radius: 20px; font-size: 12px;
+            font-weight: 600; border: 1px solid;
+        }
+
+        .status-pill.offline { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+        .status-pill.online { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+        .status-pill.reconnecting { background: rgba(251, 191, 36, 0.15); border-color: var(--yellow); color: var(--yellow); }
+
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+        }
+        .status-dot.offline { background: var(--red); }
+        .status-dot.online { background: var(--green); animation: pulse-dot 2s infinite; }
+        .status-dot.reconnecting { background: var(--yellow); animation: pulse-dot 1s infinite; }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
+            50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+        }
+
+        /* ===== LAYOUT ===== */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 300px 1fr 320px;
+            gap: 0;
+            height: calc(100vh - 57px);
+        }
+
+        .panel {
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        .panel:last-child { border-right: none; }
+
+        .panel-header {
+            padding: 16px 16px 12px;
+            font-size: 11px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 1.5px;
+            color: var(--text-dim);
+            border-bottom: 1px solid var(--border);
+            position: sticky; top: 0;
+            background: var(--bg-secondary);
+            z-index: 10;
+        }
+
+        /* ===== LEFT PANEL - CONTROL ===== */
+        .left-panel { background: var(--bg-secondary); }
+
+        .control-section {
+            padding: 16px; border-bottom: 1px solid var(--border);
+        }
+
+        .control-section h3 {
+            font-size: 12px; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .form-group { margin-bottom: 12px; }
+
+        .form-group label {
+            display: block; font-size: 12px; color: var(--text-dim);
+            margin-bottom: 4px;
+        }
+
+        .form-group select, .form-group input {
+            width: 100%; padding: 8px 10px; border-radius: 6px;
+            background: var(--bg); border: 1px solid var(--border);
+            color: var(--text); font-size: 13px; font-family: 'JetBrains Mono', monospace;
+            outline: none; transition: border-color 0.2s;
+        }
+
+        .form-group select:focus, .form-group input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-glow);
+        }
+
+        .btn {
+            width: 100%; padding: 10px 16px; border: none; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: all 0.2s; display: flex; align-items: center;
+            justify-content: center; gap: 6px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: white;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(99,102,241,0.4); }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+        }
+        .btn-danger:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(239,68,68,0.4); }
+
+        .btn-secondary {
+            background: var(--bg); color: var(--text); border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { background: var(--bg-card); border-color: var(--accent); }
+
+        .btn:disabled {
+            opacity: 0.5; cursor: not-allowed; transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Frequency quick picks */
+        .freq-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+        }
+
+        .freq-chip {
+            padding: 6px 8px; border-radius: 6px; font-size: 11px;
+            background: var(--bg); border: 1px solid var(--border);
+            cursor: pointer; transition: all 0.15s; text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .freq-chip:hover { border-color: var(--accent); background: var(--bg-card); }
+        .freq-chip.active { border-color: var(--accent); background: rgba(96,165,250,0.1); color: var(--accent); }
+
+        .freq-chip .freq-val { font-weight: 600; font-size: 12px; }
+        .freq-chip .freq-label { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+
+        /* Node list */
+        .node-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; border-radius: 6px; cursor: pointer;
+            transition: background 0.15s; margin-bottom: 4px;
+        }
+
+        .node-item:hover { background: var(--bg-card); }
+        .node-item.selected { background: rgba(96,165,250,0.1); border: 1px solid var(--accent); }
+
+        .node-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+        }
+        .node-dot.available { background: var(--green); }
+        .node-dot.unavailable { background: var(--red); opacity: 0.5; }
+        .node-dot.unknown { background: var(--text-dim); }
+
+        .node-info { flex: 1; min-width: 0; }
+        .node-name { font-size: 12px; font-weight: 500; }
+        .node-detail { font-size: 10px; color: var(--text-dim); }
+
+        /* ===== CENTER PANEL ===== */
+        .center-panel { background: var(--bg); display: flex; flex-direction: column; }
+
+        /* Meter section */
+        .meter-section {
+            padding: 24px; border-bottom: 1px solid var(--border);
+            background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
+        }
+
+        .meter-display {
+            display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 16px; margin-bottom: 20px;
+        }
+
+        .meter-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 16px; text-align: center;
+            transition: border-color 0.3s;
+        }
+
+        .meter-card.active { border-color: var(--green); box-shadow: 0 0 20px rgba(52,211,153,0.1); }
+
+        .meter-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 6px; }
+        .meter-value {
+            font-family: 'JetBrains Mono', monospace; font-size: 28px;
+            font-weight: 700; line-height: 1;
+        }
+        .meter-unit { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+        .meter-value.blue { color: var(--accent); }
+        .meter-value.green { color: var(--green); }
+        .meter-value.yellow { color: var(--yellow); }
+        .meter-value.purple { color: var(--purple); }
+
+        /* RMS Chart */
+        .chart-container {
+            flex: 1; padding: 16px; min-height: 200px;
+            display: flex; flex-direction: column;
+        }
+
+        .chart-title {
+            font-size: 12px; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        #rmsCanvas {
+            width: 100%; flex: 1; border-radius: 8px;
+            background: var(--bg-card); border: 1px solid var(--border);
+        }
+
+        /* ===== RIGHT PANEL ===== */
+        .right-panel { background: var(--bg-secondary); }
+
+        .signal-log { padding: 0; }
+
+        .signal-entry {
+            padding: 12px 16px; border-bottom: 1px solid var(--border);
+            animation: fadeInSlide 0.3s ease;
+        }
+
+        @keyframes fadeInSlide {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .signal-entry-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .signal-number {
+            font-size: 11px; font-weight: 700; color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .signal-time { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+
+        .signal-detail { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+        .signal-detail strong { color: var(--text); font-weight: 500; }
+
+        .signal-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+
+        .tag {
+            font-size: 9px; padding: 2px 6px; border-radius: 4px;
+            font-weight: 600; text-transform: uppercase;
+        }
+        .tag-freq { background: rgba(96,165,250,0.15); color: var(--accent); }
+        .tag-dur { background: rgba(52,211,153,0.15); color: var(--green); }
+        .tag-rms { background: rgba(167,139,250,0.15); color: var(--purple); }
+
+        /* Stats section */
+        .stats-mini { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+        .stats-mini h4 {
+            font-size: 11px; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+        }
+
+        .stat-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 3px 0; font-size: 12px;
+        }
+        .stat-row .stat-label { color: var(--text-dim); }
+        .stat-row .stat-val { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center; padding: 40px 20px; color: var(--text-dim);
+        }
+        .empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.3; }
+        .empty-state p { font-size: 13px; }
+
+        /* Loading spinner */
+        .spinner {
+            width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: white; border-radius: 50%;
+            animation: spin 0.8s linear infinite; display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Responsive */
+        @media (max-width: 1100px) {
+            .main-layout { grid-template-columns: 260px 1fr; }
+            .right-panel { display: none; }
+        }
+
+        @media (max-width: 768px) {
+            .main-layout { grid-template-columns: 1fr; }
+            .left-panel { display: none; }
+        }
+
+        /* Signal active glow animation on the whole meter section */
+        .meter-section.signal-active {
+            background: linear-gradient(180deg, rgba(52,211,153,0.05) 0%, var(--bg) 100%);
+        }
+
+        /* ===== RECONNECTION BANNER ===== */
+        .reconnect-banner {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            background: linear-gradient(90deg, rgba(251,191,36,0.12), rgba(251,191,36,0.05));
+            border-bottom: 1px solid rgba(251,191,36,0.3);
+            color: var(--yellow);
+            font-size: 13px;
+            font-weight: 500;
+            animation: reconnectPulse 2s ease-in-out infinite;
+        }
+        .reconnect-banner.visible { display: flex; }
+        .reconnect-banner .reconnect-icon {
+            font-size: 18px;
+            animation: spin 1.5s linear infinite;
+        }
+        .reconnect-banner .reconnect-text { flex: 1; }
+        .reconnect-banner .reconnect-attempt {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            background: rgba(251,191,36,0.15);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        @keyframes reconnectPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">MR</div>
+            <div>
+                <div class="logo-text">MilRadio</div>
+                <div class="logo-sub">Military HF Signal Monitor</div>
+            </div>
+        </div>
+        <div class="header-status">
+            <div id="wsStatus" class="status-pill offline">
+                <span class="status-dot offline"></span>
+                <span>Disconnected</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- RECONNECTION BANNER -->
+    <div class="reconnect-banner" id="reconnectBanner">
+        <span class="reconnect-icon">↻</span>
+        <span class="reconnect-text" id="reconnectText">正在重新连接...</span>
+        <span class="reconnect-attempt" id="reconnectAttempt">第 1 次重连</span>
+    </div>
+
+    <!-- MAIN LAYOUT -->
+    <div class="main-layout">
+        <!-- LEFT PANEL: Controls -->
+        <div class="panel left-panel">
+            <div class="panel-header">Control Panel</div>
+
+            <!-- Quick Frequencies -->
+            <div class="control-section">
+                <h3>Quick Frequencies</h3>
+                <div class="freq-grid" id="freqGrid">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+
+            <!-- Monitor Controls -->
+            <div class="control-section">
+                <h3>Monitor Settings</h3>
+                <div class="form-group">
+                    <label>Frequency (kHz)</label>
+                    <input type="number" id="freqInput" value="11175" step="0.1" min="100" max="30000">
+                </div>
+                <div class="form-group">
+                    <label>Mode</label>
+                    <select id="modeSelect">
+                        <option value="USB" selected>USB (Upper Sideband)</option>
+                        <option value="LSB">LSB (Lower Sideband)</option>
+                        <option value="AM">AM (Amplitude Modulation)</option>
+                        <option value="CW">CW (Continuous Wave)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Node</label>
+                    <select id="nodeSelect">
+                        <option value="">Auto (best available)</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" id="btnStart" onclick="startMonitor()">
+                    Start Monitoring
+                </button>
+                <button class="btn btn-danger" id="btnStop" onclick="stopMonitor()" style="display:none; margin-top:8px;">
+                    Stop Monitoring
+                </button>
+            </div>
+
+            <!-- Nodes -->
+            <div class="control-section">
+                <h3>KiwiSDR Nodes</h3>
+                <button class="btn btn-secondary" onclick="checkNodes()" id="btnCheckNodes" style="margin-bottom: 10px;">
+                    Check Node Availability
+                </button>
+                <div id="nodeList">
+                    <div class="empty-state"><p>Click check to scan nodes</p></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER PANEL: Monitor Display -->
+        <div class="panel center-panel">
+            <!-- Meters -->
+            <div class="meter-section" id="meterSection">
+                <div class="meter-display">
+                    <div class="meter-card" id="freqCard">
+                        <div class="meter-label">Frequency</div>
+                        <div class="meter-value blue" id="mFreq">--</div>
+                        <div class="meter-unit">kHz</div>
+                    </div>
+                    <div class="meter-card" id="rmsCard">
+                        <div class="meter-label">RMS Level</div>
+                        <div class="meter-value green" id="mRms">0.0000</div>
+                        <div class="meter-unit">signal energy</div>
+                    </div>
+                    <div class="meter-card">
+                        <div class="meter-label">S-Meter</div>
+                        <div class="meter-value yellow" id="mSmeter">-120</div>
+                        <div class="meter-unit">dBm</div>
+                    </div>
+                    <div class="meter-card">
+                        <div class="meter-label">Signals</div>
+                        <div class="meter-value purple" id="mSignals">0</div>
+                        <div class="meter-unit" id="mElapsed">-- elapsed</div>
+                    </div>
+                </div>
+
+                <!-- Signal indicator bar -->
+                <div style="height:6px; border-radius:3px; background:var(--bg); overflow:hidden; position:relative;">
+                    <div id="signalBar" style="height:100%; width:0%; background:linear-gradient(90deg, var(--green), var(--cyan)); border-radius:3px; transition: width 0.15s;"></div>
+                </div>
+            </div>
+
+            <!-- RMS Chart -->
+            <div class="chart-container">
+                <div class="chart-title">Real-Time Signal Level</div>
+                <canvas id="rmsCanvas"></canvas>
+            </div>
+        </div>
+
+        <!-- RIGHT PANEL: Signal Log -->
+        <div class="panel right-panel">
+            <div class="panel-header">Signal Log</div>
+            <div id="signalLog">
+                <div class="empty-state">
+                    <div class="empty-icon">~</div>
+                    <p>No signals detected yet.<br>Start monitoring to begin.</p>
+                </div>
+            </div>
+
+            <!-- Mini stats -->
+            <div class="stats-mini" id="statsSection" style="display:none;">
+                <h4>Session Stats</h4>
+                <div class="stat-row">
+                    <span class="stat-label">Total Signals</span>
+                    <span class="stat-val" id="statTotal">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Session Time</span>
+                    <span class="stat-val" id="statTime">00:00</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Reconnects</span>
+                    <span class="stat-val" id="statReconnects">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Avg Peak RMS</span>
+                    <span class="stat-val" id="statAvgRms">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============ STATE ============
+        let ws = null;
+        let monitoring = false;
+        let rmsData = [];
+        const MAX_RMS_POINTS = 200;
+        let signalPeaks = [];
+        let canvas, ctx;
+        let squelchThreshold = 0.15;  // 从服务器获取实际值
+
+        // ============ INIT ============
+        document.addEventListener('DOMContentLoaded', () => {
+            canvas = document.getElementById('rmsCanvas');
+            ctx = canvas.getContext('2d');
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            loadFrequencies();
+            loadNodes();
+            connectWebSocket();
+            drawChart();
+        });
+
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = Math.max(rect.height - 40, 150);
+        }
+
+        // ============ WEBSOCKET ============
+        function connectWebSocket() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+            ws.onopen = () => {
+                setWSStatus(true);
+            };
+
+            ws.onclose = () => {
+                setWSStatus(false);
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = () => {
+                setWSStatus(false);
+            };
+
+            ws.onmessage = (evt) => {
+                const data = JSON.parse(evt.data);
+                handleWSMessage(data);
+            };
+        }
+
+        function setWSStatus(online) {
+            const el = document.getElementById('wsStatus');
+            el.className = `status-pill ${online ? 'online' : 'offline'}`;
+            el.innerHTML = `<span class="status-dot ${online ? 'online' : 'offline'}"></span>
+                            <span>${online ? 'Connected' : 'Disconnected'}</span>`;
+        }
+
+        function handleWSMessage(data) {
+            switch(data.type) {
+                case 'init':
+                    if (data.squelch_threshold) {
+                        squelchThreshold = data.squelch_threshold;
+                    }
+                    if (data.monitoring) {
+                        monitoring = true;
+                        updateMonitorUI(true);
+                        document.getElementById('mFreq').textContent = data.frequency || '--';
+                    }
+                    break;
+
+                case 'realtime':
+                    updateRealtime(data);
+                    break;
+
+                case 'signal_detected':
+                    addSignalEntry(data);
+                    break;
+
+                case 'monitor_started':
+                    monitoring = true;
+                    updateMonitorUI(true);
+                    hideReconnectBanner();
+                    document.getElementById('mFreq').textContent = data.frequency;
+                    break;
+
+                case 'monitor_stopped':
+                    monitoring = false;
+                    updateMonitorUI(false);
+                    hideReconnectBanner();
+                    if (data.total_reconnects > 0) {
+                        addLogEntry('系统', `监听已停止。共重连 ${data.total_reconnects} 次`, 'purple');
+                    }
+                    break;
+
+                case 'reconnecting':
+                    showReconnectBanner(data.message, data.attempt, data.wait_seconds);
+                    addLogEntry('重连', data.message, 'yellow');
+                    break;
+
+                case 'reconnect_wait':
+                    showReconnectBanner(`等待 ${data.seconds}s 后重连...`, data.attempt);
+                    startReconnectCountdown(data.seconds);
+                    break;
+
+                case 'reconnected':
+                    hideReconnectBanner();
+                    addLogEntry('重连成功', data.message, 'green');
+                    break;
+
+                case 'node_switch':
+                    addLogEntry('节点切换', data.message, 'cyan');
+                    break;
+
+                case 'error':
+                    if (!monitoring) {
+                        updateMonitorUI(false);
+                    }
+                    addLogEntry('错误', data.message, 'red');
+                    break;
+            }
+        }
+
+        // ============ REALTIME UPDATE ============
+        function updateRealtime(data) {
+            // RMS
+            const rms = data.rms || 0;
+            rmsData.push(rms);
+            if (rmsData.length > MAX_RMS_POINTS) rmsData.shift();
+
+            document.getElementById('mRms').textContent = rms.toFixed(4);
+            document.getElementById('mSmeter').textContent = (data.smeter || -120).toFixed(0);
+            document.getElementById('mSignals').textContent = data.total_signals || 0;
+
+            // Elapsed time
+            const elapsed = data.elapsed || 0;
+            const hrs = Math.floor(elapsed / 3600);
+            const mins = Math.floor((elapsed % 3600) / 60);
+            const secs = Math.floor(elapsed % 60);
+            const elapsedStr = hrs > 0 ? `${hrs}h ${mins}m ${secs}s` : `${mins}m ${secs}s`;
+            document.getElementById('mElapsed').textContent = `${elapsedStr} elapsed`;
+
+            // Signal bar
+            const barWidth = Math.min(rms * 2000, 100);
+            document.getElementById('signalBar').style.width = barWidth + '%';
+            document.getElementById('signalBar').style.background = data.signal_active
+                ? 'linear-gradient(90deg, #34d399, #22d3ee, #60a5fa)' 
+                : 'linear-gradient(90deg, #3b82f6, #6366f1)';
+
+            // Card glow
+            const rmsCard = document.getElementById('rmsCard');
+            if (data.signal_active) {
+                rmsCard.classList.add('active');
+                document.getElementById('meterSection').classList.add('signal-active');
+            } else {
+                rmsCard.classList.remove('active');
+                document.getElementById('meterSection').classList.remove('signal-active');
+            }
+
+            // Stats
+            document.getElementById('statTotal').textContent = data.total_signals || 0;
+            const timeStr = hrs > 0 ? `${hrs}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}` : `${mins}:${secs.toString().padStart(2,'0')}`;
+            document.getElementById('statTime').textContent = timeStr;
+            document.getElementById('statReconnects').textContent = data.reconnects || 0;
+
+            drawChart();
+        }
+
+        // ============ RMS CHART ============
+        function drawChart() {
+            if (!ctx || !canvas.width) return;
+            const w = canvas.width, h = canvas.height;
+            const padding = { top: 10, right: 10, bottom: 20, left: 50 };
+            const plotW = w - padding.left - padding.right;
+            const plotH = h - padding.top - padding.bottom;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Background
+            ctx.fillStyle = '#111827';
+            ctx.fillRect(0, 0, w, h);
+
+            if (rmsData.length < 2) {
+                ctx.fillStyle = '#4a5568';
+                ctx.font = '13px Inter';
+                ctx.textAlign = 'center';
+                ctx.fillText('Waiting for data...', w/2, h/2);
+                return;
+            }
+
+            // Grid lines
+            const maxRms = Math.max(...rmsData, squelchThreshold * 1.2, 0.05);
+            const gridLines = 5;
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            ctx.font = '10px JetBrains Mono';
+            ctx.fillStyle = '#64748b';
+            ctx.textAlign = 'right';
+
+            for (let i = 0; i <= gridLines; i++) {
+                const y = padding.top + (plotH * i / gridLines);
+                const val = maxRms * (1 - i / gridLines);
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(w - padding.right, y);
+                ctx.stroke();
+                ctx.fillText(val.toFixed(3), padding.left - 5, y + 3);
+            }
+
+            // Threshold line (使用实际配置的静噪阈值)
+            const threshY = padding.top + plotH * (1 - squelchThreshold / maxRms);
+            if (threshY > padding.top && threshY < h - padding.bottom) {
+                ctx.strokeStyle = 'rgba(248, 113, 113, 0.4)';
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(padding.left, threshY);
+                ctx.lineTo(w - padding.right, threshY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#f87171';
+                ctx.textAlign = 'left';
+                ctx.fillText(`SQUELCH ${squelchThreshold.toFixed(2)}`, w - padding.right - 100, threshY - 4);
+            }
+
+            // RMS line with gradient fill
+            const stepX = plotW / (MAX_RMS_POINTS - 1);
+            const startIdx = Math.max(0, rmsData.length - MAX_RMS_POINTS);
+
+            // Fill gradient under curve
+            const gradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
+            gradient.addColorStop(0, 'rgba(96, 165, 250, 0.3)');
+            gradient.addColorStop(1, 'rgba(96, 165, 250, 0.01)');
+
+            ctx.beginPath();
+            ctx.moveTo(padding.left, h - padding.bottom);
+            for (let i = startIdx; i < rmsData.length; i++) {
+                const x = padding.left + (i - startIdx) * stepX;
+                const y = padding.top + plotH * (1 - rmsData[i] / maxRms);
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(padding.left + (rmsData.length - 1 - startIdx) * stepX, h - padding.bottom);
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            // Line
+            ctx.beginPath();
+            for (let i = startIdx; i < rmsData.length; i++) {
+                const x = padding.left + (i - startIdx) * stepX;
+                const y = padding.top + plotH * (1 - rmsData[i] / maxRms);
+                if (i === startIdx) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = '#60a5fa';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Current value dot
+            if (rmsData.length > 0) {
+                const lastX = padding.left + (rmsData.length - 1 - startIdx) * stepX;
+                const lastY = padding.top + plotH * (1 - rmsData[rmsData.length-1] / maxRms);
+                ctx.beginPath();
+                ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+                ctx.fillStyle = rmsData[rmsData.length-1] > squelchThreshold ? '#34d399' : '#60a5fa';
+                ctx.fill();
+                ctx.strokeStyle = '#0a0e17';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        // ============ SIGNAL LOG ============
+        function addSignalEntry(data) {
+            const log = document.getElementById('signalLog');
+            // Remove empty state
+            const empty = log.querySelector('.empty-state');
+            if (empty) empty.remove();
+
+            document.getElementById('statsSection').style.display = 'block';
+
+            const entry = document.createElement('div');
+            entry.className = 'signal-entry';
+
+            const now = new Date();
+            const timeStr = now.toTimeString().substr(0, 8);
+
+            entry.innerHTML = `
+                <div class="signal-entry-header">
+                    <span class="signal-number">#${data.signal_number}</span>
+                    <span class="signal-time">${timeStr}</span>
+                </div>
+                <div class="signal-tags">
+                    <span class="tag tag-freq">${data.frequency_khz} kHz</span>
+                    <span class="tag tag-dur">${data.duration}s</span>
+                    <span class="tag tag-rms">RMS ${data.peak_rms}</span>
+                </div>
+                ${data.recording ? `<div class="signal-detail" style="margin-top:4px;font-size:10px;">File: ${data.recording}</div>` : ''}
+            `;
+
+            log.insertBefore(entry, log.firstChild);
+
+            // Keep max 50 entries
+            while (log.children.length > 50) log.removeChild(log.lastChild);
+
+            // Update avg rms
+            signalPeaks.push(data.peak_rms);
+            const avg = signalPeaks.reduce((a,b) => a+b, 0) / signalPeaks.length;
+            document.getElementById('statAvgRms').textContent = avg.toFixed(4);
+        }
+
+        // ============ RECONNECTION UI ============
+        let reconnectTimer = null;
+
+        function showReconnectBanner(message, attempt, waitSeconds) {
+            const banner = document.getElementById('reconnectBanner');
+            const text = document.getElementById('reconnectText');
+            const attemptEl = document.getElementById('reconnectAttempt');
+            banner.classList.add('visible');
+            text.textContent = message;
+            attemptEl.textContent = `第 ${attempt} 次重连`;
+
+            // Update header status to reconnecting
+            const el = document.getElementById('wsStatus');
+            el.className = 'status-pill reconnecting';
+            el.innerHTML = `<span class="status-dot reconnecting"></span>
+                            <span>Reconnecting...</span>`;
+        }
+
+        function hideReconnectBanner() {
+            document.getElementById('reconnectBanner').classList.remove('visible');
+            if (reconnectTimer) {
+                clearInterval(reconnectTimer);
+                reconnectTimer = null;
+            }
+            // Restore header status
+            setWSStatus(true);
+        }
+
+        function startReconnectCountdown(seconds) {
+            if (reconnectTimer) clearInterval(reconnectTimer);
+            let remaining = seconds;
+            const text = document.getElementById('reconnectText');
+            reconnectTimer = setInterval(() => {
+                remaining--;
+                if (remaining <= 0) {
+                    text.textContent = '正在重新连接...';
+                    clearInterval(reconnectTimer);
+                    reconnectTimer = null;
+                } else {
+                    text.textContent = `${remaining}s 后重新连接...`;
+                }
+            }, 1000);
+        }
+
+        function addLogEntry(label, message, color) {
+            const log = document.getElementById('signalLog');
+            const empty = log.querySelector('.empty-state');
+            if (empty) empty.remove();
+
+            const entry = document.createElement('div');
+            entry.className = 'signal-entry';
+            const now = new Date();
+            const timeStr = now.toTimeString().substr(0, 8);
+            const colorMap = {
+                'yellow': 'var(--yellow)', 'green': 'var(--green)',
+                'red': 'var(--red)', 'cyan': 'var(--cyan)',
+                'purple': 'var(--purple)', 'blue': 'var(--accent)',
+            };
+            const c = colorMap[color] || 'var(--text-dim)';
+            entry.innerHTML = `
+                <div class="signal-entry-header">
+                    <span class="signal-number" style="color:${c}">[${label}]</span>
+                    <span class="signal-time">${timeStr}</span>
+                </div>
+                <div class="signal-detail">${message}</div>
+            `;
+            log.insertBefore(entry, log.firstChild);
+            while (log.children.length > 50) log.removeChild(log.lastChild);
+
+            document.getElementById('statsSection').style.display = 'block';
+        }
+
+        // ============ CONTROLS ============
+        function updateMonitorUI(active) {
+            document.getElementById('btnStart').style.display = active ? 'none' : 'flex';
+            document.getElementById('btnStop').style.display = active ? 'flex' : 'none';
+            document.getElementById('freqInput').disabled = active;
+            document.getElementById('modeSelect').disabled = active;
+            document.getElementById('nodeSelect').disabled = active;
+        }
+
+        async function startMonitor() {
+            const freq = parseFloat(document.getElementById('freqInput').value);
+            const mode = document.getElementById('modeSelect').value;
+            const nodeHost = document.getElementById('nodeSelect').value;
+
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStart').innerHTML = '<span class="spinner"></span> Connecting...';
+
+            try {
+                const resp = await fetch('/api/monitor/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ frequency: freq, mode: mode, node_host: nodeHost })
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                }
+            } catch(e) {
+                alert('Connection error: ' + e.message);
+            }
+
+            document.getElementById('btnStart').disabled = false;
+            document.getElementById('btnStart').innerHTML = 'Start Monitoring';
+        }
+
+        async function stopMonitor() {
+            await fetch('/api/monitor/stop', { method: 'POST' });
+        }
+
+        // ============ FREQUENCIES ============
+        async function loadFrequencies() {
+            try {
+                const resp = await fetch('/api/frequencies');
+                const freqs = await resp.json();
+
+                const grid = document.getElementById('freqGrid');
+                grid.innerHTML = '';
+
+                // Show HFGCS high-priority frequencies
+                const hfgcs = freqs.filter(f => f.network === 'hfgcs' && f.priority === 'high');
+                const others = freqs.filter(f => f.priority === 'high' && f.network !== 'hfgcs').slice(0, 2);
+
+                [...hfgcs, ...others].forEach(f => {
+                    const chip = document.createElement('div');
+                    chip.className = 'freq-chip';
+                    chip.innerHTML = `<div class="freq-val">${f.freq}</div>
+                                     <div class="freq-label">${f.mode}</div>`;
+                    chip.onclick = () => {
+                        document.getElementById('freqInput').value = f.freq;
+                        document.getElementById('modeSelect').value = f.mode;
+                        document.querySelectorAll('.freq-chip').forEach(c => c.classList.remove('active'));
+                        chip.classList.add('active');
+                    };
+                    grid.appendChild(chip);
+                });
+            } catch(e) {
+                console.log('Cannot load frequencies:', e);
+            }
+        }
+
+        // ============ NODES ============
+        async function loadNodes() {
+            try {
+                const resp = await fetch('/api/nodes');
+                const nodes = await resp.json();
+                const select = document.getElementById('nodeSelect');
+                select.innerHTML = '<option value="">Auto (best available)</option>';
+                nodes.forEach(n => {
+                    const opt = document.createElement('option');
+                    opt.value = n.host;
+                    opt.textContent = `${n.name || n.host} (${n.location || '?'})`;
+                    select.appendChild(opt);
+                });
+            } catch(e) { console.log('Cannot load nodes:', e); }
+        }
+
+        async function checkNodes() {
+            const btn = document.getElementById('btnCheckNodes');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Checking...';
+
+            try {
+                const resp = await fetch('/api/nodes/check', { method: 'POST' });
+                const data = await resp.json();
+
+                // Reload node list
+                const resp2 = await fetch('/api/nodes');
+                const nodes = await resp2.json();
+
+                const list = document.getElementById('nodeList');
+                list.innerHTML = '';
+
+                nodes.forEach(n => {
+                    const item = document.createElement('div');
+                    item.className = 'node-item';
+                    const dotClass = n.is_available ? 'available' : (n.last_check ? 'unavailable' : 'unknown');
+                    item.innerHTML = `
+                        <div class="node-dot ${dotClass}"></div>
+                        <div class="node-info">
+                            <div class="node-name">${n.name || n.host}</div>
+                            <div class="node-detail">${n.location || ''} ${n.latency_ms ? `| ${Math.round(n.latency_ms)}ms` : ''}</div>
+                        </div>
+                    `;
+                    item.onclick = () => {
+                        document.getElementById('nodeSelect').value = n.host;
+                        document.querySelectorAll('.node-item').forEach(i => i.classList.remove('selected'));
+                        item.classList.add('selected');
+                    };
+                    list.appendChild(item);
+                });
+
+                // Update select
+                const select = document.getElementById('nodeSelect');
+                select.innerHTML = '<option value="">Auto (best available)</option>';
+                nodes.forEach(n => {
+                    const opt = document.createElement('option');
+                    opt.value = n.host;
+                    opt.textContent = `${n.name || n.host}${n.is_available ? ' [OK]' : ''}`;
+                    select.appendChild(opt);
+                });
+
+            } catch(e) {
+                alert('Check failed: ' + e.message);
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Check Node Availability';
+        }
+    </script>
+</body>
+</html>

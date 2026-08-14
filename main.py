@@ -218,14 +218,11 @@ async def cmd_analyze(config: dict, db: Database, args):
 
     print(f"\n[ANALYZE] 正在分析: {file_path}\n")
 
-    ana_cfg = config.get("analysis", {})
-    analyzer = SignalAnalyzer(
-        fft_size=ana_cfg.get("fft_size", 4096),
-        window_type=ana_cfg.get("window_type", "hann"),
-        bandwidth_threshold_db=ana_cfg.get("bandwidth_threshold_db", 20),
-    )
+    # 统一工厂方法，保证和监听时用的是同一套分析参数
+    analyzer = SignalAnalyzer.from_config(config)
+    mode = getattr(args, "mode", None) or "USB"
 
-    result = analyzer.analyze_file(file_path)
+    result = analyzer.analyze_file(file_path, mode=mode)
 
     if result is None:
         print("[ERROR] 分析失败")
@@ -246,14 +243,34 @@ async def cmd_analyze(config: dict, db: Database, args):
     print(f"     峰均比: {result['crest_factor_db']:.1f} dB")
     print(f"     总能量: {result['energy_total']:.4f}")
     print("-" * 50)
-    print(f"  [FREQ-DOMAIN] 频域分析:")
+    band = result.get("passband_hz", [0, 0])
+    print(f"  [FREQ-DOMAIN] 频域分析 (通带 {band[0]:.0f}-{band[1]:.0f} Hz, "
+          f"模式 {result.get('demod_mode', '?')}):")
     print(f"     峰值频率: {result.get('peak_frequency_hz', 0):.1f} Hz")
     print(f"     频谱质心: {result.get('spectral_centroid_hz', 0):.1f} Hz")
-    print(f"     信号带宽: {result.get('bandwidth_hz', 0):.1f} Hz")
-    print(f"     信噪比 (SNR): {result.get('snr_db', 0):.1f} dB")
+    print(f"     占用带宽: {result.get('bandwidth_hz', 0):.1f} Hz "
+          f"(旧口径 -{analyzer.bandwidth_threshold_db:.0f}dB: "
+          f"{result.get('bandwidth_20db_hz', 0):.1f} Hz)")
+    print(f"     带内 SNR: {result.get('snr_db', 0):.1f} dB "
+          f"(噪声基底 {result.get('noise_floor_db', 0):.1f} dB)")
     print(f"     频谱平坦度: {result.get('spectral_flatness', 0):.6f}")
     print("-" * 50)
-    print(f"  [MODULATION] 估计调制类型: {result.get('estimated_modulation', 'UNKNOWN')}")
+    print(f"  [FEATURES] 判别特征:")
+    print(f"     包络音节率: {result.get('envelope_rate_hz', 0):.1f} Hz "
+          f"(深度 {result.get('envelope_depth', 0):.2f})")
+    print(f"     键控率: {result.get('keying_rate_hz', 0):.1f} Hz")
+    print(f"     音调数: {result.get('tone_count', 0)} "
+          f"(间距 {result.get('tone_spacing_hz', 0):.0f} Hz, "
+          f"纯度 {result.get('tone_purity', 0):.2f})")
+    print("-" * 50)
+    print(f"  [MODULATION] 估计调制类型: {result.get('estimated_modulation', 'UNKNOWN')} "
+          f"({result.get('modulation_description', '')})")
+    print(f"     置信度: {result.get('modulation_confidence', 0):.2f}")
+    scores = result.get("modulation_scores", {})
+    if scores:
+        ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+        print(f"     各类别得分: " +
+              ", ".join(f"{k}={v:.2f}" for k, v in ranked))
     print("=" * 50)
 
     # 显示前 5 个频谱峰值
@@ -292,24 +309,22 @@ async def cmd_clean(config: dict, db: Database, args):
         "output_dir", "data/recordings"
     )
 
-    # 创建分析器
-    ana_cfg = config.get("analysis", {})
-    analyzer = SignalAnalyzer(
-        fft_size=ana_cfg.get("fft_size", 4096),
-        window_type=ana_cfg.get("window_type", "hann"),
-        bandwidth_threshold_db=ana_cfg.get("bandwidth_threshold_db", 20),
-    )
+    # 创建分析器 (统一工厂方法)
+    analyzer = SignalAnalyzer.from_config(config)
 
-    # 创建分类器
+    # 创建分类器 (解调模式决定 SNR 与调制判定的通带)
+    demod_mode = getattr(args, "mode", None) or "USB"
     classifier = RecordingClassifier(
         min_duration=args.min_duration,
         min_snr=args.min_snr,
         analyzer=analyzer,
+        mode=demod_mode,
     )
 
     mode_str = '⚠ 删除模式' if args.delete else '👁 预览模式'
     print(f"\n[CLEAN] 录音清理 ({mode_str})")
     print(f"  录音目录: {recordings_dir}")
+    print(f"  解调模式: {demod_mode}")
     print(f"  最短时长: {args.min_duration}s | 最低 SNR: {args.min_snr} dB\n")
 
     junk_list, good_list = scan_recordings(
@@ -429,6 +444,9 @@ def main():
     # --- analyze 命令 ---
     p_analyze = subparsers.add_parser("analyze", help="分析录音文件")
     p_analyze.add_argument("file", type=str, help="WAV 录音文件路径")
+    p_analyze.add_argument("-m", "--mode", type=str, default="USB",
+                           choices=["USB", "LSB", "AM", "CW", "CWN"],
+                           help="录音时使用的解调模式 (决定分析通带)")
 
     # --- report 命令 ---
     p_report = subparsers.add_parser("report", help="生成分析报告")
@@ -452,6 +470,9 @@ def main():
                          help="最短有效时长 (秒, 默认: 2.0)")
     p_clean.add_argument("--min-snr", type=float, default=5.0,
                          help="最低有效 SNR (dB, 默认: 5.0)")
+    p_clean.add_argument("-m", "--mode", type=str, default="USB",
+                         choices=["USB", "LSB", "AM", "CW", "CWN"],
+                         help="录音时的解调模式, 决定分析通带 (默认: USB)")
 
     # 解析参数
     args = parser.parse_args()

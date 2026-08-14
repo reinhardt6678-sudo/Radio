@@ -111,10 +111,24 @@ class Database:
             )
         """)
 
+        # 分析表的增量字段 (老数据库直接补列，不丢历史数据)
+        self._migrate_columns(cursor, "analysis", {
+            "modulation_confidence": "REAL",
+            "demod_mode": "TEXT",
+            "noise_floor_db": "REAL",
+            "envelope_rate_hz": "REAL",
+            "envelope_depth": "REAL",
+            "tone_count": "INTEGER",
+        })
+
         # 创建索引
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_signals_timestamp
             ON signals(timestamp)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_analysis_signal
+            ON analysis(signal_id)
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_signals_frequency
@@ -126,6 +140,14 @@ class Database:
         """)
 
         self.conn.commit()
+
+    @staticmethod
+    def _migrate_columns(cursor, table: str, columns: Dict[str, str]):
+        """给已存在的表补上缺失的列 (SQLite 不支持 ADD COLUMN IF NOT EXISTS)。"""
+        existing = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}
+        for name, col_type in columns.items():
+            if name not in existing:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
 
     # ==================== 会话操作 ====================
 
@@ -273,7 +295,13 @@ class Database:
                       crest_factor_db: float = None,
                       energy_total: float = None,
                       fft_peak_magnitudes: List[float] = None,
-                      notes: str = "") -> int:
+                      notes: str = "",
+                      modulation_confidence: float = None,
+                      demod_mode: str = None,
+                      noise_floor_db: float = None,
+                      envelope_rate_hz: float = None,
+                      envelope_depth: float = None,
+                      tone_count: int = None) -> int:
         """保存信号分析结果。"""
         with self._lock:
             cursor = self.conn.cursor()
@@ -281,8 +309,10 @@ class Database:
                 INSERT INTO analysis
                 (signal_id, timestamp, peak_frequency_hz, bandwidth_hz, snr_db,
                  estimated_modulation, spectral_centroid_hz, spectral_flatness,
-                 crest_factor_db, energy_total, fft_peak_magnitudes, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 crest_factor_db, energy_total, fft_peak_magnitudes, notes,
+                 modulation_confidence, demod_mode, noise_floor_db,
+                 envelope_rate_hz, envelope_depth, tone_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 signal_id,
                 datetime.now(timezone.utc).isoformat(),
@@ -295,7 +325,13 @@ class Database:
                 crest_factor_db,
                 energy_total,
                 json.dumps(fft_peak_magnitudes) if fft_peak_magnitudes else None,
-                notes
+                notes,
+                modulation_confidence,
+                demod_mode,
+                noise_floor_db,
+                envelope_rate_hz,
+                envelope_depth,
+                tone_count,
             ))
             self.conn.commit()
             return cursor.lastrowid
@@ -308,6 +344,103 @@ class Database:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def get_signals_with_analysis(self, days: int = 7, limit: int = 200,
+                                  frequency_khz: float = None,
+                                  with_recording: bool = False,
+                                  min_snr_db: float = None) -> List[Dict]:
+        """
+        获取信号记录及其分析结果 (供 Web 录音浏览用)。
+
+        Args:
+            days: 最近 N 天
+            limit: 最多返回条数
+            frequency_khz: 只看某个频率
+            with_recording: 只返回有录音文件的记录
+            min_snr_db: 只返回带内 SNR 不低于该值的记录
+        """
+        where = ["s.timestamp >= datetime('now', ?)"]
+        params: List[Any] = [f"-{days} days"]
+
+        if frequency_khz is not None:
+            where.append("s.frequency_khz = ?")
+            params.append(frequency_khz)
+        if with_recording:
+            where.append("s.recording_path IS NOT NULL AND s.recording_path != ''")
+        if min_snr_db is not None:
+            where.append("a.snr_db >= ?")
+            params.append(min_snr_db)
+
+        params.append(limit)
+        cursor = self.conn.execute(f"""
+            SELECT
+                s.id, s.session_id, s.timestamp, s.frequency_khz, s.mode,
+                s.node_host, s.node_name, s.duration_seconds, s.peak_rms,
+                s.avg_rms, s.s_meter_dbm, s.recording_path, s.description,
+                s.network,
+                a.snr_db, a.bandwidth_hz, a.peak_frequency_hz,
+                a.estimated_modulation, a.modulation_confidence,
+                a.spectral_flatness, a.crest_factor_db, a.noise_floor_db,
+                a.envelope_rate_hz, a.envelope_depth, a.tone_count,
+                a.demod_mode
+            FROM signals s
+            LEFT JOIN analysis a ON a.signal_id = s.id
+            WHERE {' AND '.join(where)}
+            ORDER BY s.timestamp DESC
+            LIMIT ?
+        """, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_signal_with_analysis(self, signal_id: int) -> Optional[Dict]:
+        """获取单条信号及其分析结果。"""
+        cursor = self.conn.execute("""
+            SELECT s.*, a.snr_db, a.bandwidth_hz, a.peak_frequency_hz,
+                   a.estimated_modulation, a.modulation_confidence,
+                   a.spectral_flatness, a.crest_factor_db, a.noise_floor_db,
+                   a.envelope_rate_hz, a.envelope_depth, a.tone_count,
+                   a.demod_mode
+            FROM signals s
+            LEFT JOIN analysis a ON a.signal_id = s.id
+            WHERE s.id = ?
+        """, (signal_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_snr_distribution(self, days: int = 7) -> List[Dict]:
+        """
+        带内 SNR 的分布 (5 dB 一档)，用于判断读数是否健康。
+
+        带内 SNR 对纯底噪是负值，而 SQLite 的 CAST 是向零截断而非向下取整
+        (-7.9 → -1 而不是 -2)，所以负数要单独往下推一档，否则 0 那一档会
+        横跨 -5 到 +5，正好把这个指标最该说明问题的区间搅乱。
+        """
+        cursor = self.conn.execute("""
+            SELECT
+                CAST(a.snr_db / 5.0 AS INTEGER) * 5
+                    - (CASE WHEN a.snr_db < CAST(a.snr_db / 5.0 AS INTEGER) * 5
+                            THEN 5 ELSE 0 END) AS bucket_db,
+                COUNT(*) as count
+            FROM analysis a
+            JOIN signals s ON a.signal_id = s.id
+            WHERE s.timestamp >= datetime('now', ?) AND a.snr_db IS NOT NULL
+            GROUP BY bucket_db
+            ORDER BY bucket_db ASC
+        """, (f"-{days} days",))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_daily_activity(self, days: int = 14) -> List[Dict]:
+        """按天统计信号数量与总时长。"""
+        cursor = self.conn.execute("""
+            SELECT
+                date(timestamp) as day,
+                COUNT(*) as signal_count,
+                SUM(duration_seconds) as total_duration
+            FROM signals
+            WHERE timestamp >= datetime('now', ?)
+            GROUP BY day
+            ORDER BY day ASC
+        """, (f"-{days} days",))
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_modulation_stats(self, days: int = 7) -> List[Dict]:
         """获取调制类型统计。"""
         cursor = self.conn.execute("""
@@ -315,7 +448,8 @@ class Database:
                 a.estimated_modulation,
                 COUNT(*) as count,
                 AVG(a.snr_db) as avg_snr,
-                AVG(a.bandwidth_hz) as avg_bandwidth
+                AVG(a.bandwidth_hz) as avg_bandwidth,
+                AVG(a.modulation_confidence) as avg_confidence
             FROM analysis a
             JOIN signals s ON a.signal_id = s.id
             WHERE s.timestamp >= datetime('now', ?)

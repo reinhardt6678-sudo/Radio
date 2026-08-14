@@ -314,8 +314,10 @@ class ChartMixin:
 
             colors_map = {
                 "USB_VOICE": c["accent1"], "AM_VOICE": c["accent2"],
+                "LSB_VOICE": c["accent1"], "VOICE": c["accent1"],
                 "CW": c["accent3"], "FSK": c["accent4"],
                 "PSK": c["accent5"], "NOISE": c["accent6"],
+                "CARRIER": c["accent3"],
             }
 
             for s in modulation_stats:

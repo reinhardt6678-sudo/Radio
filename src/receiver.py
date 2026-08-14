@@ -187,7 +187,9 @@ class SignalReceiver:
                 if audio_buffer:
                     all_samples = np.concatenate(audio_buffer)
                     rms = float(np.sqrt(np.mean(all_samples ** 2)))
-                    analysis = self.analyzer.analyze_samples(all_samples, self.sample_rate)
+                    analysis = self.analyzer.analyze_samples(
+                        all_samples, self.sample_rate, mode=freq_target.mode
+                    )
 
                     scan_result = {
                         "frequency_khz": freq_target.freq_khz,
@@ -198,6 +200,8 @@ class SignalReceiver:
                         "snr_db": analysis.get("snr_db", 0),
                         "bandwidth_hz": analysis.get("bandwidth_hz", 0),
                         "estimated_modulation": analysis.get("estimated_modulation", "UNKNOWN"),
+                        "modulation_confidence": analysis.get("modulation_confidence", 0.0),
+                        "noise_floor_db": analysis.get("noise_floor_db"),
                         "has_signal": rms > self.squelch_config.get("open_threshold", 0.02),
                         "s_meter_dbm": client.smeter,
                     }
@@ -273,8 +277,10 @@ class SignalReceiver:
                 )
 
                 # 对录制的信号做频谱分析（使用统一方法避免重复代码）
+                # 传入解调模式: SNR 和调制判定都要按对应通带来算
                 self.analyzer.analyze_and_save(
-                    self.db, signal_id, signal_audio_buffer, self.sample_rate
+                    self.db, signal_id, signal_audio_buffer, self.sample_rate,
+                    mode=freq.mode
                 )
 
                 self._report_status(
@@ -382,7 +388,7 @@ class SignalReceiver:
                             description=f.description, network=f.network,
                         )
                         self.analyzer.analyze_and_save(
-                            self.db, sig_id, buf, self.sample_rate
+                            self.db, sig_id, buf, self.sample_rate, mode=f.mode
                         )
 
                     return on_open, on_audio, on_close

@@ -14,6 +14,7 @@ import logging
 import os
 import time
 import numpy as np
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Set, Dict, List
@@ -25,6 +26,7 @@ from .node_manager import NodeManager
 from .squelch import SquelchDetector
 from .recorder import AudioRecorder
 from .analyzer import SignalAnalyzer
+from .modes import audio_passband, normalize_mode
 from .db import Database
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,16 @@ logger = logging.getLogger(__name__)
 
 class WebMonitorServer:
     """实时 Web 监听界面服务器。"""
+
+    # 每积累这么多样本推一列频谱 (12000 Hz 下约 6 次/秒)
+    SPECTRUM_CHUNK = 2048
+    # 瀑布图的频率格数与显示上限
+    SPECTRUM_BINS = 128
+    SPECTRUM_F_MAX = 4000.0
+    # 噪声基底统计窗口 (RMS 块数, 约 4 分钟)
+    RMS_FLOOR_WINDOW = 6000
+    # 噪声基底取第几百分位
+    RMS_FLOOR_PERCENTILE = 20.0
 
     def __init__(self, config: dict, db: Database, freq_data: dict):
         self.config = config
@@ -58,17 +70,36 @@ class WebMonitorServer:
 
         # 实时数据
         self._current_rms = 0.0
-        self._current_smeter = -120.0
+        self._current_smeter = -127.0   # KiwiSDR S-meter 下限
         self._signal_active = False
         self._signal_audio_buffer = []
         self._rms_history = []  # 最近的 RMS 值用于图表
+        self._smeter_history = []
         self._reconnect_count = 0  # 自动重连次数
+
+        # 实时频谱 / 噪声基底
+        self._spectrum_buffer: List[np.ndarray] = []
+        self._spectrum_samples = 0
+        self._last_spectrum: Dict = {}
+        self._live_snr_db = 0.0
+        self._live_noise_floor_db = -120.0
+        self._rms_floor_window: deque = deque(maxlen=self.RMS_FLOOR_WINDOW)
+        self._rms_noise_floor = 0.0
+        self._dropped_frames = 0
+
+        # 最近信号（带 signal_id，供页面直接回放）
+        self._recent_signals: deque = deque(maxlen=50)
 
         # 分析器（使用统一工厂方法，避免配置默认值不一致）
         self._analyzer = SignalAnalyzer.from_config(config)
 
         # Web 应用目录
         self._web_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
+
+        # 录音目录（回放接口只允许访问这个目录里的文件）
+        self._recordings_dir = Path(
+            config.get("recording", {}).get("output_dir", "data/recordings")
+        ).resolve()
 
     def create_app(self) -> web.Application:
         """创建 aiohttp Web 应用。"""
@@ -88,6 +119,13 @@ class WebMonitorServer:
         app.router.add_get("/api/frequencies", self._api_frequencies)
         app.router.add_get("/api/signals", self._api_signals)
         app.router.add_get("/api/stats", self._api_stats)
+        app.router.add_get("/api/sessions", self._api_sessions)
+        app.router.add_get("/api/recordings", self._api_recordings)
+        app.router.add_get("/api/recordings/{signal_id}/audio", self._api_recording_audio)
+        app.router.add_get("/api/recordings/{signal_id}/spectrogram",
+                           self._api_recording_spectrogram)
+        app.router.add_get("/api/squelch", self._api_get_squelch)
+        app.router.add_post("/api/squelch", self._api_set_squelch)
         app.router.add_post("/api/monitor/start", self._api_start_monitor)
         app.router.add_post("/api/monitor/stop", self._api_stop_monitor)
 
@@ -142,6 +180,12 @@ class WebMonitorServer:
             "mode": self._current_mode,
             "node": self._current_node.get("name", ""),
             "squelch_threshold": sq_cfg.get("open_threshold", 0.15),
+            "squelch_close": sq_cfg.get("close_threshold", 0.085),
+            "passband": list(audio_passband(self._current_mode)),
+            "spectrum_bins": self.SPECTRUM_BINS,
+            "spectrum_f_max": self.SPECTRUM_F_MAX,
+            "recent_signals": list(self._recent_signals)[-20:],
+            "rms_history": self._rms_history[-200:],
         })
 
         try:
@@ -180,6 +224,7 @@ class WebMonitorServer:
     async def _api_status(self, request: web.Request) -> web.Response:
         """获取当前系统状态。"""
         elapsed = time.time() - self._monitor_start_time if self._monitoring else 0
+        sq_cfg = self.config.get("squelch", {})
         return web.json_response({
             "monitoring": self._monitoring,
             "frequency_khz": self._current_freq,
@@ -193,7 +238,18 @@ class WebMonitorServer:
             "elapsed_seconds": round(elapsed, 0),
             "session_id": self._session_id,
             "rms_history": self._rms_history[-100:],  # 最近100个点
+            "smeter_history": self._smeter_history[-100:],
             "reconnects": self._reconnect_count,
+            "snr_db": round(self._live_snr_db, 1),
+            "noise_floor_db": round(self._live_noise_floor_db, 1),
+            "rms_noise_floor": round(self._rms_noise_floor, 5),
+            "dropped_frames": self._dropped_frames,
+            "passband": list(audio_passband(self._current_mode)),
+            "squelch": {
+                "open_threshold": sq_cfg.get("open_threshold", 0.15),
+                "close_threshold": sq_cfg.get("close_threshold", 0.085),
+            },
+            "spectrum": self._last_spectrum,
         })
 
     async def _api_nodes(self, request: web.Request) -> web.Response:
@@ -255,12 +311,249 @@ class WebMonitorServer:
             days = min(max(int(request.query.get("days", 7)), 1), 365)
         except (ValueError, TypeError):
             return web.json_response({"error": "参数无效"}, status=400)
-        freq_stats = self.db.get_frequency_stats(days=days)
-        hourly = self.db.get_hourly_activity(days=days)
         return web.json_response({
-            "frequency_stats": freq_stats,
-            "hourly_activity": hourly,
+            "days": days,
+            "frequency_stats": self.db.get_frequency_stats(days=days),
+            "hourly_activity": self.db.get_hourly_activity(days=days),
+            "modulation_stats": self.db.get_modulation_stats(days=days),
+            "snr_distribution": self.db.get_snr_distribution(days=days),
+            "daily_activity": self.db.get_daily_activity(days=max(days, 14)),
         })
+
+    async def _api_sessions(self, request: web.Request) -> web.Response:
+        """获取最近的监听会话。"""
+        try:
+            limit = min(max(int(request.query.get("limit", 20)), 1), 200)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "参数无效"}, status=400)
+        return web.json_response(self.db.get_recent_sessions(limit=limit))
+
+    # ==================== 录音浏览与回放 ====================
+
+    def _resolve_recording(self, row: dict) -> Optional[Path]:
+        """
+        把数据库里的录音路径解析成真实文件路径。
+
+        只允许访问配置的录音目录，避免路径穿越。
+        """
+        raw = (row or {}).get("recording_path")
+        if not raw:
+            return None
+        try:
+            path = Path(raw).resolve()
+        except (OSError, ValueError):
+            return None
+        if path != self._recordings_dir and self._recordings_dir not in path.parents:
+            logger.warning(f"拒绝访问录音目录之外的文件: {raw}")
+            return None
+        return path if path.is_file() else None
+
+    async def _api_recordings(self, request: web.Request) -> web.Response:
+        """获取信号+分析记录（带录音文件信息），供页面浏览回放。"""
+        try:
+            days = min(max(int(request.query.get("days", 7)), 1), 365)
+            limit = min(max(int(request.query.get("limit", 100)), 1), 500)
+            min_snr = request.query.get("min_snr")
+            min_snr = float(min_snr) if min_snr not in (None, "") else None
+            freq = request.query.get("frequency")
+            freq = float(freq) if freq not in (None, "") else None
+        except (ValueError, TypeError):
+            return web.json_response({"error": "参数无效"}, status=400)
+
+        with_file = request.query.get("with_recording", "0") in ("1", "true", "yes")
+        rows = self.db.get_signals_with_analysis(
+            days=days, limit=limit, frequency_khz=freq,
+            with_recording=with_file, min_snr_db=min_snr,
+        )
+
+        for row in rows:
+            path = self._resolve_recording(row)
+            row["has_audio"] = path is not None
+            row["file_size_kb"] = round(path.stat().st_size / 1024, 1) if path else 0
+            row["filename"] = os.path.basename(row.get("recording_path") or "")
+            # 不把服务器上的绝对路径暴露给页面
+            row.pop("recording_path", None)
+
+        return web.json_response(rows)
+
+    async def _api_recording_audio(self, request: web.Request) -> web.Response:
+        """回放录音文件。"""
+        try:
+            signal_id = int(request.match_info["signal_id"])
+        except (ValueError, TypeError, KeyError):
+            return web.json_response({"error": "无效的信号 ID"}, status=400)
+
+        row = self.db.get_signal_with_analysis(signal_id)
+        if not row:
+            return web.json_response({"error": "信号不存在"}, status=404)
+
+        path = self._resolve_recording(row)
+        if path is None:
+            return web.json_response({"error": "录音文件不存在"}, status=404)
+
+        return web.FileResponse(path, headers={
+            "Content-Type": "audio/wav",
+            "Cache-Control": "no-cache",
+        })
+
+    async def _api_recording_spectrogram(self, request: web.Request) -> web.Response:
+        """
+        录音的频谱图 + 包络，用于页面上的缩略图。
+
+        analyzer.get_spectrogram() 早就写好了，但界面一直没用过它。
+        """
+        try:
+            signal_id = int(request.match_info["signal_id"])
+            max_bins = min(max(int(request.query.get("bins", 96)), 16), 256)
+            max_cols = min(max(int(request.query.get("cols", 180)), 16), 600)
+        except (ValueError, TypeError, KeyError):
+            return web.json_response({"error": "参数无效"}, status=400)
+
+        row = self.db.get_signal_with_analysis(signal_id)
+        if not row:
+            return web.json_response({"error": "信号不存在"}, status=404)
+
+        path = self._resolve_recording(row)
+        if path is None:
+            return web.json_response({"error": "录音文件不存在"}, status=404)
+
+        loaded = await asyncio.get_running_loop().run_in_executor(
+            None, SignalAnalyzer.load_wav, str(path)
+        )
+        if loaded is None:
+            return web.json_response({"error": "录音读取失败"}, status=500)
+
+        samples, sample_rate = loaded
+        mode = normalize_mode(row.get("demod_mode") or row.get("mode"))
+        f_lo, f_hi = audio_passband(mode, sample_rate)
+
+        times, freqs, sxx_db = await asyncio.get_running_loop().run_in_executor(
+            None, self._analyzer.get_spectrogram, samples, sample_rate
+        )
+
+        # 只保留通带附近，并降采样到页面能画得下的尺寸
+        keep = (freqs >= max(0.0, f_lo - 300)) & (freqs <= min(f_hi + 500, sample_rate / 2))
+        if not np.any(keep):
+            keep = np.ones_like(freqs, dtype=bool)
+        freqs = freqs[keep]
+        sxx_db = sxx_db[keep, :]
+
+        f_step = max(1, len(freqs) // max_bins)
+        t_step = max(1, sxx_db.shape[1] // max_cols)
+        freqs = freqs[::f_step]
+        sxx_db = sxx_db[::f_step, ::t_step]
+        times = times[::t_step]
+
+        # 量化到 0-255，页面直接当灰度画。
+        # 动态范围按这段录音自己的分布定，弱信号和强信号都能看清
+        db_floor = float(np.percentile(sxx_db, 25))
+        db_ceil = float(np.percentile(sxx_db, 99.7))
+        if db_ceil - db_floor < 20.0:
+            db_ceil = db_floor + 20.0
+        scaled = np.clip((sxx_db - db_floor) / (db_ceil - db_floor), 0, 1)
+        matrix = (scaled * 255).astype(np.uint8)
+
+        # 包络 (每列 RMS)，画波形缩略图
+        env_cols = min(len(samples), 400)
+        block = max(1, len(samples) // env_cols)
+        usable = (len(samples) // block) * block
+        envelope = np.sqrt(np.mean(
+            samples[:usable].reshape(-1, block) ** 2, axis=1
+        )) if usable else np.zeros(1)
+
+        return web.json_response({
+            "signal_id": signal_id,
+            "duration_seconds": float(len(samples) / sample_rate),
+            "sample_rate": sample_rate,
+            "mode": mode,
+            "freq_min": float(freqs[0]) if len(freqs) else 0.0,
+            "freq_max": float(freqs[-1]) if len(freqs) else 0.0,
+            "passband": [f_lo, f_hi],
+            "n_freq": int(matrix.shape[0]),
+            "n_time": int(matrix.shape[1]),
+            "db_floor": round(db_floor, 1),
+            "db_ceil": round(db_ceil, 1),
+            # 按时间列展开: [t0f0, t0f1, ... ]
+            "matrix": matrix.T.flatten().tolist(),
+            "envelope": [round(float(v), 5) for v in envelope],
+        })
+
+    # ==================== 静噪阈值 ====================
+
+    async def _api_get_squelch(self, request: web.Request) -> web.Response:
+        """当前静噪设置与实测噪声基底。"""
+        sq_cfg = self.config.get("squelch", {})
+        return web.json_response({
+            "open_threshold": sq_cfg.get("open_threshold", 0.15),
+            "close_threshold": sq_cfg.get("close_threshold", 0.085),
+            "tail_time": sq_cfg.get("tail_time", 3.0),
+            "rms_noise_floor": round(self._rms_noise_floor, 5),
+            "current_rms": round(self._current_rms, 5),
+            "samples": len(self._rms_floor_window),
+            # 建议值: 噪声基底 + 6 dB
+            "suggested_open": round(self._rms_noise_floor * 2.0, 5),
+            "suggested_close": round(self._rms_noise_floor * 1.7, 5),
+        })
+
+    async def _api_set_squelch(self, request: web.Request) -> web.Response:
+        """
+        在线调整静噪阈值。
+
+        改动会立刻作用到正在跑的检测器上，不用停下监听重来。
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "无效的 JSON 请求体"}, status=400)
+
+        sq_cfg = self.config.setdefault("squelch", {})
+        updated = {}
+
+        try:
+            if "open_threshold" in data:
+                value = float(data["open_threshold"])
+                if not (0.0 < value <= 1.0):
+                    return web.json_response({"error": "开启阈值需在 0-1 之间"}, status=400)
+                updated["open_threshold"] = value
+            if "close_threshold" in data:
+                value = float(data["close_threshold"])
+                if not (0.0 < value <= 1.0):
+                    return web.json_response({"error": "关闭阈值需在 0-1 之间"}, status=400)
+                updated["close_threshold"] = value
+            if "tail_time" in data:
+                value = float(data["tail_time"])
+                if not (0.0 <= value <= 60.0):
+                    return web.json_response({"error": "尾部延迟需在 0-60 秒之间"}, status=400)
+                updated["tail_time"] = value
+        except (ValueError, TypeError):
+            return web.json_response({"error": "参数必须是数字"}, status=400)
+
+        if not updated:
+            return web.json_response({"error": "没有可更新的参数"}, status=400)
+
+        open_th = updated.get("open_threshold", sq_cfg.get("open_threshold", 0.15))
+        close_th = updated.get("close_threshold", sq_cfg.get("close_threshold", 0.085))
+        if close_th >= open_th:
+            return web.json_response(
+                {"error": "关闭阈值必须低于开启阈值 (否则没有滞后)"}, status=400)
+
+        sq_cfg.update(updated)
+
+        # 作用到正在运行的检测器
+        if self._squelch:
+            self._squelch.open_threshold = open_th
+            self._squelch.close_threshold = close_th
+            if "tail_time" in updated:
+                self._squelch.tail_time = updated["tail_time"]
+
+        logger.info(f"静噪阈值已更新: {updated}")
+        await self._broadcast_ws({
+            "type": "squelch_updated",
+            "open_threshold": open_th,
+            "close_threshold": close_th,
+            "tail_time": sq_cfg.get("tail_time", 3.0),
+        })
+        return web.json_response({"status": "ok", **sq_cfg})
 
     async def _api_start_monitor(self, request: web.Request) -> web.Response:
         """开始监听。"""
@@ -326,9 +619,17 @@ class WebMonitorServer:
         self._current_node = node
         self._total_signals = 0
         self._rms_history = []
+        self._smeter_history = []
         self._monitor_start_time = time.time()
         self._monitoring = True
         self._reconnect_count = 0
+        self._spectrum_buffer = []
+        self._spectrum_samples = 0
+        self._last_spectrum = {}
+        self._rms_floor_window.clear()
+        self._rms_noise_floor = 0.0
+        self._dropped_frames = 0
+        self._recent_signals.clear()
 
         # 重连参数
         MAX_BACKOFF = 60       # 最大重连等待秒数
@@ -407,6 +708,8 @@ class WebMonitorServer:
                 await self._broadcast_ws({
                     "type": "monitor_started",
                     "frequency": freq_khz, "mode": mode, "node": node_name,
+                    "node_host": host,
+                    "passband": list(audio_passband(mode)),
                 })
 
                 await self._kiwi_client.set_frequency(freq_khz, mode)
@@ -446,21 +749,35 @@ class WebMonitorServer:
                     )
 
                     # 频谱分析（使用统一方法避免重复代码）
+                    # 传入解调模式: SNR 和调制判定按对应通带来算
                     sr = self.config.get("receiver", {}).get("sample_rate", 12000)
-                    self._analyzer.analyze_and_save(
-                        self.db, sig_id, self._signal_audio_buffer, sr
-                    )
+                    analysis = self._analyzer.analyze_and_save(
+                        self.db, sig_id, self._signal_audio_buffer, sr, mode=mode
+                    ) or {}
 
-                    # 通过 WebSocket 推送信号事件 (fire-and-forget)
-                    self._loop.create_task(self._broadcast_ws({
+                    entry = {
                         "type": "signal_detected",
+                        "signal_id": sig_id,
                         "signal_number": self._total_signals,
                         "frequency_khz": freq_khz,
+                        "mode": mode,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "duration": round(duration, 1),
                         "peak_rms": round(peak_rms, 4),
                         "avg_rms": round(avg_rms, 4),
+                        "smeter_dbm": round(self._current_smeter, 1),
+                        "snr_db": round(analysis.get("snr_db", 0.0), 1),
+                        "bandwidth_hz": round(analysis.get("bandwidth_hz", 0.0)),
+                        "modulation": analysis.get("estimated_modulation", "UNKNOWN"),
+                        "modulation_confidence": analysis.get("modulation_confidence", 0.0),
+                        "envelope_rate_hz": round(analysis.get("envelope_rate_hz", 0.0), 1),
+                        "has_audio": bool(rec_info),
                         "recording": os.path.basename(rec_info["path"]) if rec_info else None,
-                    }))
+                    }
+                    self._recent_signals.append(entry)
+
+                    # 通过 WebSocket 推送信号事件 (fire-and-forget)
+                    self._loop.create_task(self._broadcast_ws(entry))
 
                 self._squelch.set_callbacks(
                     on_open=on_signal_open,
@@ -470,14 +787,55 @@ class WebMonitorServer:
 
                 # 音频处理 + 实时推送
                 _push_counter = [0]
+                sample_rate = self.config.get("receiver", {}).get("sample_rate", 12000)
 
                 async def process_audio(samples, smeter):
                     self._current_rms = float(np.sqrt(np.mean(samples ** 2)))
                     self._current_smeter = smeter
                     self._squelch.process(samples)
+
                     self._rms_history.append(round(self._current_rms, 5))
                     if len(self._rms_history) > 500:
                         self._rms_history = self._rms_history[-500:]
+                    self._smeter_history.append(round(smeter, 1))
+                    if len(self._smeter_history) > 500:
+                        self._smeter_history = self._smeter_history[-500:]
+
+                    # 滚动噪声基底: 静噪关闭时的 RMS 低分位数。
+                    # 有了它就不用再靠"试出来"的固定阈值 —— CHANGELOG 里
+                    # 0.65 → 0.15 → 0.10 三次手调调的其实是节点的 AGC。
+                    if not self._signal_active:
+                        self._rms_floor_window.append(self._current_rms)
+                    if len(self._rms_floor_window) >= 20:
+                        self._rms_noise_floor = float(np.percentile(
+                            self._rms_floor_window, self.RMS_FLOOR_PERCENTILE))
+
+                    if self._kiwi_client:
+                        self._dropped_frames = self._kiwi_client.dropped_frames
+
+                    # 累积到一定长度算一列频谱 (瀑布图)
+                    self._spectrum_buffer.append(samples)
+                    self._spectrum_samples += len(samples)
+                    if self._spectrum_samples >= self.SPECTRUM_CHUNK:
+                        chunk = np.concatenate(self._spectrum_buffer)
+                        self._spectrum_buffer = []
+                        self._spectrum_samples = 0
+                        spectrum = self._analyzer.live_spectrum(
+                            chunk, sample_rate, mode=mode,
+                            n_bins=self.SPECTRUM_BINS, f_max=self.SPECTRUM_F_MAX,
+                        )
+                        self._last_spectrum = spectrum
+                        self._live_snr_db = spectrum.get("snr_db", 0.0)
+                        self._live_noise_floor_db = spectrum.get("noise_floor_db", -120.0)
+                        await self._broadcast_ws({
+                            "type": "spectrum",
+                            "bins": spectrum["bins"],
+                            "f_max": spectrum["f_max"],
+                            "snr_db": spectrum["snr_db"],
+                            "noise_floor_db": spectrum["noise_floor_db"],
+                            "peak_frequency_hz": spectrum["peak_frequency_hz"],
+                            "signal_active": self._signal_active,
+                        })
 
                     # 每 5 次推送一次实时数据 (降低频率)
                     _push_counter[0] += 1
@@ -486,6 +844,10 @@ class WebMonitorServer:
                             "type": "realtime",
                             "rms": round(self._current_rms, 5),
                             "smeter": round(smeter, 1),
+                            "snr_db": round(self._live_snr_db, 1),
+                            "noise_floor_db": round(self._live_noise_floor_db, 1),
+                            "rms_noise_floor": round(self._rms_noise_floor, 5),
+                            "dropped_frames": self._dropped_frames,
                             "signal_active": self._signal_active,
                             "total_signals": self._total_signals,
                             "elapsed": round(time.time() - self._monitor_start_time, 0),

@@ -1,0 +1,46 @@
+# ============================================================
+# MilRadio - 版本库忽略规则
+# ============================================================
+# 原则: 版本库只放源码与配置, 不放运行时产生的数据与产物。
+
+# --- 监听运行时数据 (本地产生, 体积随监听时长无上限增长) ---
+# data/recordings/   录音 WAV, 由 monitor/web 产生
+# data/radio_monitor.db  SQLite 库, 首次运行自动创建
+# data/public_logs/  公开日志, 由 fetch_public_logs.py 重新下载
+# data/eam_comparison/   EAM 对比数据, 由 compare_eam.py 重新生成
+# 以上目录均由程序自动创建, 无需手工建。
+data/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- 测试与工具缓存 ---
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- 虚拟环境 ---
+.venv/
+venv/
+env/
+
+# --- 编辑器 / 操作系统 ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- 说明 ---
+# reports/ 保持跟踪: 生成的 HTML 报告通过 <img src="chart_*.png">
+# 引用同目录下的图表, 单独忽略 PNG 会让已提交的报告变成坏图。
+# 整个目录仅约 740 KB。

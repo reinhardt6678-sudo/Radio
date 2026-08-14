@@ -26,12 +26,13 @@ class FrequencyTarget:
 
     def __init__(self, freq_khz: float, mode: str = "USB",
                  description: str = "", network: str = "",
-                 priority: str = "medium"):
+                 priority: str = "medium", active_hours: str = ""):
         self.freq_khz = freq_khz
         self.mode = mode
         self.description = description
         self.network = network
         self.priority = priority
+        self.active_hours = active_hours
 
     def __repr__(self):
         return f"<{self.freq_khz} kHz {self.mode} ({self.description})>"
@@ -303,17 +304,28 @@ class SignalReceiver:
             await client.start_audio_stream(process_audio)
 
             # 等待直到 duration 到期或被取消
+            report_interval = 30.0
+            next_report = start_time + report_interval
             while self._running:
                 await asyncio.sleep(1)
 
-                # 定期状态报告
-                elapsed = time.time() - start_time
-                if int(elapsed) % 30 == 0 and int(elapsed) > 0:
+                # 定期状态报告。
+                # 用下一次报告的时间戳来判断，不能写成 int(elapsed) % 30 == 0:
+                # sleep(1) 每轮都会多走几毫秒，int(elapsed) 偶尔会从 29 跳到 31，
+                # 那一次报告就被整个跳过了。
+                now = time.time()
+                elapsed = now - start_time
+                if now >= next_report:
+                    next_report = now + report_interval
                     status = squelch.get_status()
+                    # 带上音频帧数: RMS 恒为 0 且帧数不涨 = 根本没有音频进来，
+                    # 和"有音频但没有信号"是两回事，日志里必须能分得开。
                     self._report_status(
                         f"[MONITORING] {freq.freq_khz} kHz | "
                         f"RMS={status['current_rms']:.4f} | "
                         f"signals={self._total_signals} | "
+                        f"frames={client.audio_frames} "
+                        f"(dropped={client.dropped_frames}) | "
                         f"elapsed={elapsed:.0f}s"
                     )
 
@@ -322,7 +334,17 @@ class SignalReceiver:
                     break
 
                 if not client.connected:
-                    logger.warning("KiwiSDR 连接断开")
+                    if client.audio_frames == 0:
+                        logger.warning(
+                            "KiwiSDR 连接结束，且全程没有收到任何音频帧 —— "
+                            "换个节点重试，或用 python diagnose_rms.py 单独验一次链路"
+                        )
+                    else:
+                        logger.warning(
+                            f"KiwiSDR 连接断开 (共收到 {client.audio_frames} 个音频帧)。"
+                            "命令行 monitor 不会自动重连，需要长时间监听请用 "
+                            "python main.py web"
+                        )
                     break
 
             # 停止并清理

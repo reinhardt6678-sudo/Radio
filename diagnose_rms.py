@@ -1,131 +1,257 @@
+#!/usr/bin/env python3
 """
-RMS 诊断 v3 - 完整握手流程，正确消耗所有初始化消息后再发音频命令
+diagnose_rms.py - 接收链路体检
+
+回答一个问题: **守着某个频率收不到信号，到底卡在哪一层。**
+
+分三种情况，输出会直接说是哪一种:
+  1. 根本没有音频帧进来   -> 节点/网络/握手的问题，和频率无关
+  2. 有音频，但 RMS 一直够不到静噪阈值 -> 阈值相对这个节点定高了
+  3. 有音频，RMS 大部分时间都在阈值之上 -> 阈值定低了，会一直误触发
+
+之前这个脚本自己抄了一份帧解析，停留在 v1.3.0 修复之前的布局
+(seq 读成 2 字节大端、S-meter 读成 body[3:5]、音频取 body[5:])，
+量出来的 S-meter 是错的，打印的阈值建议还停在早就废弃的 0.65。
+现在直接复用 src.kiwi_client.KiwiSDRClient —— 体检用的解析和真正监听时
+用的必须是同一份代码，否则量准了也没有意义。
+
+用法:
+    python diagnose_rms.py                      # config.yaml 的首选节点, 11175 USB, 30s
+    python diagnose_rms.py -f 8992 -d 60        # 换频率和时长
+    python diagnose_rms.py --node kphsdr.com    # 指定节点
+    python diagnose_rms.py --all-nodes          # 逐个节点各测一遍，看哪个能听到
 """
-import asyncio, time, struct
+
+import argparse
+import asyncio
+import io
+import sys
+from pathlib import Path
+
 import numpy as np
-from websockets.asyncio.client import connect as ws_connect
+import yaml
+
+# Windows 控制台 GBK 编码无法输出 Unicode 字符
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+from src.kiwi_client import KiwiSDRClient
+from src.modes import normalize_mode
+from src.schedule import check_targets, format_window
+
+DEFAULT_FREQ = 11175.0
+DEFAULT_MODE = "USB"
+DEFAULT_DURATION = 30.0
+
+
+def load_yaml(path: str) -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {}
+    with open(p, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+async def measure(host: str, port: int, freq_khz: float, mode: str,
+                  duration: float) -> dict:
+    """
+    连到一个节点上收 duration 秒音频，返回逐块 RMS 和链路统计。
+    """
+    result = {
+        "host": host, "port": port,
+        "connected": False,
+        "rms": [],
+        "smeter": [],
+        "audio_frames": 0,
+        "dropped_frames": 0,
+        "error": None,
+    }
+
+    client = KiwiSDRClient(host, port)
+    try:
+        if not await client.connect(timeout=15):
+            result["error"] = "握手失败 (节点满员/需要密码/无法连接)"
+            return result
+        result["connected"] = True
+
+        await client.set_frequency(freq_khz, mode)
+
+        rms_list, smeter_list = [], []
+
+        async def on_audio(samples, smeter):
+            if len(samples):
+                rms_list.append(float(np.sqrt(np.mean(samples ** 2))))
+                smeter_list.append(float(smeter))
+
+        await client.start_audio_stream(on_audio)
+
+        # 分段等待，节点中途掉线时不用干等满
+        waited = 0.0
+        while waited < duration and client.connected:
+            await asyncio.sleep(0.5)
+            waited += 0.5
+
+        await client.stop_audio_stream()
+
+        result["rms"] = rms_list
+        result["smeter"] = smeter_list
+        result["audio_frames"] = client.audio_frames
+        result["dropped_frames"] = client.dropped_frames
+        if not client.connected and waited < duration:
+            result["error"] = f"测量中途连接断开 (第 {waited:.0f}s)"
+
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        await client.disconnect()
+
+    return result
+
+
+def report(result: dict, open_th: float, close_th: float,
+           freq_khz: float, mode: str, duration: float) -> bool:
+    """打印单个节点的体检结果，返回这个节点是否算"链路正常"。"""
+    name = f"{result['host']}:{result['port']}"
+    print(f"\n{'=' * 66}")
+    print(f"  {name}  |  {freq_khz:.1f} kHz {mode}  |  {duration:.0f}s")
+    print(f"{'=' * 66}")
+
+    if not result["connected"]:
+        print(f"  [X] 连不上: {result['error']}")
+        return False
+
+    rms = np.array(result["rms"], dtype=float)
+    frames = result["audio_frames"]
+
+    print(f"  音频帧: {frames}   丢帧: {result['dropped_frames']}   "
+          f"RMS 块数: {len(rms)}")
+    if result["error"]:
+        print(f"  [!] {result['error']}")
+
+    # --- 情况 1: 没有音频 ---
+    if len(rms) == 0:
+        print("\n  [X] 握手成功，但一个音频帧都没有收到。")
+        print("      这一层就断了，和频率、阈值都没有关系。常见原因:")
+        print("        - 节点通道被占满 / 对匿名用户有时长限制")
+        print("        - 出口把 8073 之类的端口挡掉了 (KiwiSDR 走 ws://，不是 443)")
+        print("        - 该节点当前不可用，换一个再试: python diagnose_rms.py --all-nodes")
+        return False
+
+    noise_floor = float(np.percentile(rms, 20))
+    median = float(np.median(rms))
+    above_open = int((rms >= open_th).sum())
+    above_ratio = above_open / len(rms)
+
+    smeter = np.array(result["smeter"], dtype=float) if result["smeter"] else None
+
+    print(f"\n  RMS   最小 {rms.min():.5f}  底噪(P20) {noise_floor:.5f}  "
+          f"中位 {median:.5f}  最大 {rms.max():.5f}")
+    if smeter is not None and len(smeter):
+        print(f"  S-meter  {smeter.min():.1f} ~ {smeter.max():.1f} dBm  "
+              f"(中位 {np.median(smeter):.1f})")
+
+    print(f"\n  当前阈值 open={open_th}  close={close_th}")
+    print(f"  能触发静噪的块: {above_open}/{len(rms)} ({above_ratio * 100:.1f}%)")
+
+    # --- 判定 ---
+    healthy = True
+    print()
+    if above_open == 0:
+        headroom = open_th / noise_floor if noise_floor > 0 else float("inf")
+        print(f"  [X] 这段时间里没有任何一块能越过 open_threshold。")
+        print(f"      阈值是本节点底噪的 {headroom:.1f} 倍 —— 只要这个倍数一直这么高，"
+              f"守多久都不会有信号。")
+        healthy = False
+    elif above_ratio > 0.5:
+        print(f"  [X] 超过一半的块都在阈值之上，静噪基本处于常开状态，"
+              f"录下来的多半是底噪。")
+        healthy = False
+    else:
+        print(f"  [OK] 阈值落在底噪和峰值之间，静噪能正常开合。")
+
+    suggested_open = round(noise_floor * 2.0, 4)      # 底噪 +6 dB
+    suggested_close = round(noise_floor * 1.7, 4)
+    print(f"\n  按本节点实测底噪建议: open_threshold={suggested_open}  "
+          f"close_threshold={suggested_close}")
+    print(f"  (阈值是跟着节点 AGC 走的绝对电平，换节点就要重新量一次;"
+          f" Web 界面上有\"按底噪设定\"可以直接套用)")
+
+    return healthy
+
 
 async def main():
-    host, port = "sdr.ironstonerange.com", 8075
-    uri = f"ws://{host}:{port}/kiwi/{int(time.time())}/SND"
-    print(f"连接 {host}:{port} ...")
+    parser = argparse.ArgumentParser(
+        description="KiwiSDR 接收链路体检 - 定位'守着频率收不到信号'卡在哪一层")
+    parser.add_argument("-f", "--freq", type=float, default=DEFAULT_FREQ,
+                        help=f"频率 kHz (默认 {DEFAULT_FREQ})")
+    parser.add_argument("-m", "--mode", type=str, default=DEFAULT_MODE,
+                        choices=["USB", "LSB", "AM", "CW", "CWN"],
+                        help=f"解调模式 (默认 {DEFAULT_MODE})")
+    parser.add_argument("-d", "--duration", type=float, default=DEFAULT_DURATION,
+                        help=f"每个节点测量时长 秒 (默认 {DEFAULT_DURATION:.0f})")
+    parser.add_argument("--node", type=str, default=None,
+                        help="指定节点 host (默认用 config.yaml 里的第一个)")
+    parser.add_argument("--all-nodes", action="store_true",
+                        help="逐个测 config.yaml 里的所有节点")
+    parser.add_argument("-c", "--config", default="config.yaml")
+    parser.add_argument("--freq-file", default="frequencies.yaml")
+    args = parser.parse_args()
 
-    ws = await asyncio.wait_for(
-        ws_connect(uri, additional_headers={"Origin": f"http://{host}:{port}"},
-                   max_size=2**20, ping_interval=None), timeout=10)
+    config = load_yaml(args.config)
+    nodes = config.get("nodes", [])
+    if not nodes:
+        print("[ERROR] config.yaml 里没有配置任何节点")
+        return 1
 
-    # Step 1: 发送 auth
-    await ws.send("SET auth t=kiwi p=")
+    sq = config.get("squelch", {})
+    open_th = sq.get("open_threshold", 0.10)
+    close_th = sq.get("close_threshold", 0.085)
+    mode = normalize_mode(args.mode)
 
-    # Step 2: 消耗所有握手消息直到 audio_init 或超时
-    print("握手中...")
-    deadline = time.time() + 10.0
-    while time.time() < deadline:
-        try:
-            msg = await asyncio.wait_for(ws.recv(), timeout=0.5)
-        except asyncio.TimeoutError:
-            continue
-        if isinstance(msg, bytes) and len(msg) > 3:
-            tag = msg[0:3]
-            if tag == b"MSG":
-                text = msg[3:].decode("ascii", errors="ignore")
-                if "audio_init" in text:
-                    print(f"  [OK] {text}")
-                    break
-                elif len(msg) < 100:
-                    pass  # skip short msgs silently
+    # 选节点
+    if args.all_nodes:
+        targets = nodes
+    elif args.node:
+        targets = [n for n in nodes if args.node.lower() in n["host"].lower()]
+        if not targets:
+            print(f"[ERROR] config.yaml 里没有匹配 '{args.node}' 的节点")
+            return 1
+    else:
+        targets = nodes[:1]
 
-    # Step 3: 发送音频命令
-    commands = [
-        "SET AR OK in=12000 out=12000",
-        "SET squelch=0 max=0",
-        "SET genattn=0",
-        "SET gen=0 mix=-1",
-        "SET agc=1 hang=0 thresh=-100 slope=6 decay=1000 manGain=50",
-        "SET compression=0",
-        "SET mod=usb low_cut=300 high_cut=3000 freq=11175.000",
-        "SET keepalive",
-    ]
-    for cmd in commands:
-        await ws.send(cmd)
-    print("音频命令已发送\n")
+    print("=" * 66)
+    print("  接收链路体检")
+    print("=" * 66)
+    print(f"  频率: {args.freq:.1f} kHz {mode}")
+    print(f"  节点: {len(targets)} 个   每个测 {args.duration:.0f}s")
+    print(f"  阈值: open={open_th}  close={close_th}  (来自 {args.config})")
 
-    # Step 4: 收集 SND 帧
-    rms_list = []
-    frame_count = 0
-    start = time.time()
+    # 活跃时段提示
+    freq_data = load_yaml(args.freq_file)
+    for line in check_targets(freq_data, [args.freq]):
+        print(line)
 
-    print(f"{'#':>4} | {'bytes':>5} | {'fl':>4} | {'seq':>5} | {'S-meter':>8} | {'RMS':>10} | {'peak':>8}")
-    print("-" * 65)
+    healthy_nodes = []
+    for node in targets:
+        result = await measure(
+            node["host"], node.get("port", 8073),
+            args.freq, mode, args.duration,
+        )
+        if report(result, open_th, close_th, args.freq, mode, args.duration):
+            healthy_nodes.append(node.get("name", node["host"]))
 
-    while time.time() - start < 15:
-        try:
-            msg = await asyncio.wait_for(ws.recv(), timeout=1.0)
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            print(f"错误: {e}")
-            break
+    if len(targets) > 1:
+        print(f"\n{'=' * 66}")
+        print(f"  汇总: {len(healthy_nodes)}/{len(targets)} 个节点链路正常")
+        if healthy_nodes:
+            print(f"  可用: {', '.join(healthy_nodes)}")
+        print(f"{'=' * 66}")
 
-        if not isinstance(msg, bytes) or len(msg) < 4:
-            continue
+    return 0
 
-        tag = msg[0:3]
-        body = msg[3:]
 
-        if tag == b"SND" and len(body) >= 6:
-            flags = body[0]
-            seq = struct.unpack(">H", body[1:3])[0]
-            smeter_raw = struct.unpack(">H", body[3:5])[0]
-            smeter_dbm = (smeter_raw / 65535.0) * 150.0 - 160.0
-
-            # 官方 kiwiclient: audio = body 后面的部分
-            # body 结构: [flags(1)][seq(2)][smeter(2)][audio_pcm...]
-            # 所以 audio = body[5:]
-            audio_bytes = body[5:]
-            # 确保偶数长度
-            if len(audio_bytes) % 2 != 0:
-                audio_bytes = audio_bytes[1:]  # 跳过一个额外标志字节
-
-            if len(audio_bytes) >= 2:
-                samples = np.frombuffer(audio_bytes, dtype=">i2").astype(np.float32) / 32768.0
-                rms = float(np.sqrt(np.mean(samples ** 2)))
-                peak = float(np.max(np.abs(samples)))
-                rms_list.append(rms)
-                frame_count += 1
-
-                if frame_count <= 5 or frame_count % 20 == 0:
-                    print(f"{frame_count:4d} | {len(msg):5d} | 0x{flags:02x} | {seq:5d} | {smeter_dbm:8.1f} | {rms:10.6f} | {peak:8.5f}")
-
-    await ws.close()
-
-    if not rms_list:
-        print("\n没有收到任何 SND 帧!")
-        return
-
-    rms_arr = np.array(rms_list)
-    print(f"\n{'=' * 60}")
-    print(f"  RMS 统计 (共 {len(rms_list)} 帧, 11175 kHz USB)")
-    print(f"{'=' * 60}")
-    print(f"  底噪范围: {rms_arr.min():.6f} ~ {rms_arr.max():.6f}")
-    print(f"  平均值:   {rms_arr.mean():.6f}")
-    print(f"  中位数:   {np.median(rms_arr):.6f}")
-    print(f"  标准差:   {rms_arr.std():.6f}")
-    print()
-
-    noise_floor = np.median(rms_arr)
-    print(f"  config.yaml 当前阈值:")
-    print(f"    open_threshold:  0.65  -> 能触发信号: {(rms_arr >= 0.65).sum()}/{len(rms_arr)}")
-    print(f"    close_threshold: 0.61")
-    print()
-    print(f"  代码默认阈值:")
-    print(f"    open_threshold:  0.02  -> 能触发信号: {(rms_arr >= 0.02).sum()}/{len(rms_list)}")
-    print()
-
-    suggested_open = round(noise_floor + max(4 * rms_arr.std(), 0.005), 4)
-    suggested_close = round(noise_floor + max(3 * rms_arr.std(), 0.003), 4)
-    print(f"  建议阈值 (基于实测底噪):")
-    print(f"    open_threshold:  {suggested_open}")
-    print(f"    close_threshold: {suggested_close}")
-
-asyncio.run(main())
+if __name__ == "__main__":
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    sys.exit(asyncio.run(main()))

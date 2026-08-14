@@ -51,6 +51,9 @@ class KiwiSDRClient:
     DEFAULT_PORT = 8073
     SAMPLE_RATE = 12000      # KiwiSDR 默认音频采样率
 
+    # 看门狗: 多久没有收到 SND 音频帧就判定音频流已停 (秒)
+    AUDIO_TIMEOUT = 30.0
+
     def __init__(self, host: str, port: int = 8073,
                  password: str = None):
         """
@@ -70,6 +73,7 @@ class KiwiSDRClient:
         self._dropped_frames = 0
         self._audio_frames = 0
         self._last_smeter = -127.0  # dBm
+        self._last_audio_time = 0.0  # 最近一个 SND 帧的到达时间
         self._current_freq = 0.0
         self._current_mode = "USB"
         self._audio_callback: Optional[Callable] = None
@@ -95,6 +99,18 @@ class KiwiSDRClient:
     def audio_frames(self) -> int:
         """已收到的音频帧数。"""
         return self._audio_frames
+
+    @property
+    def seconds_since_audio(self) -> float:
+        """
+        距离最近一个 SND 音频帧过了多少秒。
+
+        一帧都还没收到过时返回 inf —— 看门狗内部另有一个起算时间，
+        但对外必须能区分"刚开始还没轮到"和"真的收到过音频"。
+        """
+        if not self._audio_frames or not self._last_audio_time:
+            return float("inf")
+        return time.time() - self._last_audio_time
 
     # KiwiSDR 服务器拒绝消息 - 必须精确匹配 MSG 前缀
     # (不能用模糊匹配，因为 load_cfg 包含完整配置 JSON 会误报)
@@ -317,28 +333,49 @@ class KiwiSDRClient:
         """主接收循环 - 持续接收并解析音频数据。"""
         logger.info("音频接收循环启动")
         _frame_count = 0
-        _last_data_time = time.time()  # 看门狗: 记录最后收到数据的时间
-        _WATCHDOG_TIMEOUT = 30.0       # 30 秒无数据判定连接丢失
+        _now = time.time()
+        self._last_audio_time = _now
+        _last_msg_time = _now          # 最近收到任意帧 (含 MSG) 的时间
         try:
             while self.connected and self.ws:
                 try:
                     msg = await asyncio.wait_for(self.ws.recv(), timeout=5.0)
-                    _last_data_time = time.time()  # 收到任何数据都刷新
+                    _last_msg_time = time.time()
                 except asyncio.TimeoutError:
-                    # 检查看门狗超时
-                    if time.time() - _last_data_time > _WATCHDOG_TIMEOUT:
+                    msg = None
+
+                # 看门狗按"音频帧"计时，不能按"收到任意数据"计时。
+                # 服务器把频道静音、或者 SND 流根本没起来时，socket 上仍然会有
+                # MSG 帧和 keepalive 往来：按任意数据计时的话连接永远显得健康，
+                # 而监听端只能看到 RMS 恒为 0，一整天下来一个信号都不会有。
+                # 同理这个检查必须每轮都做 —— 只放在 recv 超时分支里的话，
+                # 持续的 MSG 流会让它一次都轮不到。
+                audio_idle = time.time() - self._last_audio_time
+                if audio_idle > self.AUDIO_TIMEOUT:
+                    socket_idle = time.time() - _last_msg_time
+                    if socket_idle > self.AUDIO_TIMEOUT:
                         logger.warning(
-                            f"{_WATCHDOG_TIMEOUT:.0f} 秒无数据，判定连接丢失 "
-                            f"(共收到 {_frame_count} 帧)"
+                            f"{audio_idle:.0f} 秒没有收到任何数据，判定连接丢失 "
+                            f"(共收到 {_frame_count} 个音频帧)"
                         )
-                        self.connected = False
-                        return
+                    else:
+                        # 这一支就是"看着在监听、其实没有音频"的情况
+                        logger.warning(
+                            f"连接仍然活着但 {audio_idle:.0f} 秒没有音频帧 "
+                            f"(最近 {socket_idle:.0f}s 内仍有非音频帧，"
+                            f"共收到 {_frame_count} 个音频帧)，判定音频流已停"
+                        )
+                    self.connected = False
+                    return
+
+                if msg is None:
                     continue
 
                 if isinstance(msg, bytes) and len(msg) > 0:
                     if self._is_audio_frame(msg):
                         # 'SND' = 音频数据帧
                         _frame_count += 1
+                        self._last_audio_time = time.time()
                         if _frame_count == 1:
                             logger.info("收到首个音频帧，数据流正常")
                         await self._process_audio_data(msg)

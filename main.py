@@ -34,6 +34,7 @@ from src.receiver import SignalReceiver, FrequencyTarget
 from src.analyzer import SignalAnalyzer
 from src.reporter import Reporter
 from src.web_server import WebMonitorServer
+from src.schedule import check_targets, format_window
 from src.exceptions import ConfigError
 
 
@@ -68,25 +69,22 @@ def load_config(config_path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def load_frequencies(freq_path: str = "frequencies.yaml") -> list:
-    """
-    加载频率数据库并转换为 FrequencyTarget 列表。
-
-    Returns:
-        FrequencyTarget 列表
-    """
+def load_frequency_data(freq_path: str = "frequencies.yaml") -> dict:
+    """加载频率数据库的原始 YAML 数据 (保留 active_hours 等字段)。"""
     path = Path(freq_path)
     if not path.exists():
         raise ConfigError(f"频率文件不存在: {freq_path}")
 
     with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        return yaml.safe_load(f)
 
+
+def targets_from_data(data: dict) -> list:
+    """把频率数据库原始数据转换为 FrequencyTarget 列表。"""
     targets = []
-    for network_key, network_data in data.items():
+    for network_key, network_data in (data or {}).items():
         if not isinstance(network_data, dict):
             continue
-        network_desc = network_data.get("description", network_key)
         for freq_info in network_data.get("frequencies", []):
             targets.append(FrequencyTarget(
                 freq_khz=freq_info["freq"],
@@ -94,9 +92,20 @@ def load_frequencies(freq_path: str = "frequencies.yaml") -> list:
                 description=freq_info.get("description", ""),
                 network=network_key,
                 priority=freq_info.get("priority", "medium"),
+                active_hours=freq_info.get("active_hours", ""),
             ))
 
     return targets
+
+
+def load_frequencies(freq_path: str = "frequencies.yaml") -> list:
+    """
+    加载频率数据库并转换为 FrequencyTarget 列表。
+
+    Returns:
+        FrequencyTarget 列表
+    """
+    return targets_from_data(load_frequency_data(freq_path))
 
 
 # ==================== 子命令实现 ====================
@@ -147,7 +156,8 @@ async def cmd_scan(config: dict, db: Database, args):
 
 async def cmd_monitor(config: dict, db: Database, args):
     """启动持续监听。"""
-    all_freqs = load_frequencies(args.freq_file)
+    freq_data = load_frequency_data(args.freq_file)
+    all_freqs = targets_from_data(freq_data)
 
     # 选择频率
     if args.frequency:
@@ -174,7 +184,13 @@ async def cmd_monitor(config: dict, db: Database, args):
 
     print(f"\n[MONITOR] 准备监听 {len(selected_freqs)} 个频率:")
     for f in selected_freqs:
-        print(f"   - {f.freq_khz:>10.1f} kHz ({f.mode}) - {f.description}")
+        print(f"   - {f.freq_khz:>10.1f} kHz ({f.mode}) "
+              f"[{format_window(f.active_hours)}] - {f.description}")
+
+    # 活跃时段提示: frequencies.yaml 里的 active_hours 以前从没被读过，
+    # "频率没错但时段不对"因此完全不可见
+    for line in check_targets(freq_data, [f.freq_khz for f in selected_freqs]):
+        print(line)
 
     # 选择节点
     node = await _select_node(config, db, args)

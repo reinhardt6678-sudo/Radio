@@ -11,6 +11,7 @@ smeter(2,大端)。偏移 2 字节的后果是每帧多解出 1 个假样本（�
 
 import asyncio
 import struct
+import time
 
 import numpy as np
 import pytest
@@ -178,3 +179,105 @@ class TestFrameDispatch:
     def test_status_frame_not_treated_as_audio(self, client):
         """以 'S' 开头但不是 SND 的帧不能当音频解析。"""
         assert not client._is_audio_frame(b'STA something')
+
+
+# ==================== 音频看门狗 ====================
+
+class FakeWebSocket:
+    """按脚本吐帧的假 websocket，用来驱动 _receive_loop。"""
+
+    def __init__(self, frame_factory, interval=0.01):
+        self._frame_factory = frame_factory
+        self._interval = interval
+        self.closed = False
+
+    async def recv(self):
+        await asyncio.sleep(self._interval)
+        frame = self._frame_factory()
+        if frame is None:
+            # 让 _receive_loop 走 recv 超时那一支
+            raise asyncio.TimeoutError()
+        return frame
+
+    async def send(self, _cmd):
+        pass
+
+    async def close(self):
+        self.closed = True
+
+
+async def run_loop(client, timeout):
+    """跑一段 _receive_loop，返回它是否自己退出了。"""
+    task = asyncio.create_task(client._receive_loop())
+    try:
+        await asyncio.wait_for(task, timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        return False
+
+
+class TestAudioWatchdog:
+    """
+    看门狗必须按"音频帧"计时。
+
+    旧实现有两个问题：收到任意数据(包括 MSG)就刷新计时器，而且只在 recv 超时
+    那一支里检查。结果是服务器把频道静音、SND 流没起来但 MSG 照发的时候，
+    连接永远显得健康，监听端只看到 RMS 恒为 0 —— 守一整天也不会有一个信号，
+    日志里还没有任何异常。
+    """
+
+    def _client(self, ws, audio_timeout=0.3):
+        client = KiwiSDRClient("test.example", 8073)
+        client.ws = ws
+        client.connected = True
+        client.AUDIO_TIMEOUT = audio_timeout
+        client._audio_callback = None
+        return client
+
+    def test_msg_traffic_does_not_keep_stream_alive(self):
+        """只有 MSG 帧、没有 SND 帧时，必须判定音频流已停。"""
+        ws = FakeWebSocket(lambda: b'MSG audio_camp=1')
+        client = self._client(ws, audio_timeout=0.3)
+
+        exited = asyncio.run(run_loop(client, timeout=3.0))
+
+        assert exited, "持续的 MSG 流不应该让看门狗永远轮不到"
+        assert client.connected is False
+
+    def test_silent_socket_detected(self):
+        """完全没有数据时同样要判定连接丢失。"""
+        ws = FakeWebSocket(lambda: None)
+        client = self._client(ws, audio_timeout=0.3)
+
+        exited = asyncio.run(run_loop(client, timeout=3.0))
+
+        assert exited
+        assert client.connected is False
+
+    def test_audio_frames_keep_stream_alive(self):
+        """持续有 SND 帧时不能被看门狗误杀。"""
+        samples = np.zeros(64, dtype=np.int16)
+        ws = FakeWebSocket(lambda: make_snd_frame(samples, seq=0, smeter_raw=300))
+        client = self._client(ws, audio_timeout=0.3)
+
+        exited = asyncio.run(run_loop(client, timeout=1.0))
+
+        assert not exited, "一直有音频帧却被判定断线"
+        assert client.connected is True
+
+    def test_seconds_since_audio_before_any_frame(self):
+        """还没收到过音频时，距离上一帧是无穷大而不是 0。"""
+        client = KiwiSDRClient("test.example", 8073)
+        assert client.seconds_since_audio == float("inf")
+
+    def test_seconds_since_audio_after_frame(self):
+        client = KiwiSDRClient("test.example", 8073)
+        feed(client, make_snd_frame(np.zeros(32, dtype=np.int16)))
+        client._last_audio_time = time.time()
+
+        assert client.seconds_since_audio < 1.0

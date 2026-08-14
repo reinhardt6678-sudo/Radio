@@ -108,13 +108,20 @@ database:
   path: "data/radio_monitor.db"
 
 # --- 分析设置 ---
+# 所有频域指标都限制在解调通带内 (USB 为 300-3000 Hz, 见 src/modes.py)
 analysis:
   # FFT 大小
   fft_size: 4096
   # 频谱分析窗口类型: hann, hamming, blackman
   window_type: "hann"
-  # 信号带宽估算阈值 (dB below peak)
+  # 旧口径带宽估算阈值 (dB below peak), 仅用于和历史数据对照
   bandwidth_threshold_db: 20
+  # 带内噪声基底取第几百分位 (越低越不容易被占满通带的信号抬高)
+  noise_percentile: 20
+  # 低于该带内 SNR 判定为 NOISE (dB)
+  noise_snr_threshold_db: 3.0
+  # 调制判定的最低置信度, 低于此值输出 UNKNOWN 而不是硬猜
+  min_confidence: 0.35
 
 # --- 报告设置 ---
 report:

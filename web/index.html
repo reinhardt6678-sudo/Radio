@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MilRadio - Military Radio Monitor</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M6 22h20M10 22V13M16 22V8M22 22V16' stroke='%2360a5fa' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -24,6 +25,7 @@
             --yellow: #fbbf24;
             --purple: #a78bfa;
             --cyan: #22d3ee;
+            --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,7 +42,7 @@
         .header {
             background: linear-gradient(135deg, #0f1729 0%, #1a1f3a 100%);
             border-bottom: 1px solid var(--border);
-            padding: 12px 24px;
+            padding: 10px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -48,37 +50,33 @@
             top: 0;
             z-index: 100;
             backdrop-filter: blur(12px);
+            gap: 16px;
         }
 
-        .header .logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+        .header .logo { display: flex; align-items: center; gap: 12px; }
 
         .logo-icon {
-            width: 36px; height: 36px;
+            width: 34px; height: 34px;
             background: linear-gradient(135deg, var(--accent), var(--purple));
             border-radius: 10px;
             display: flex; align-items: center; justify-content: center;
-            font-size: 18px; font-weight: 700; color: white;
+            font-size: 17px; font-weight: 700; color: white;
         }
 
         .logo-text {
-            font-size: 18px; font-weight: 700;
+            font-size: 17px; font-weight: 700;
             background: linear-gradient(90deg, var(--accent), var(--purple));
-            -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent; color: transparent;
         }
 
-        .logo-sub { font-size: 11px; color: var(--text-dim); }
+        .logo-sub { font-size: 10px; color: var(--text-dim); }
 
-        .header-status {
-            display: flex; align-items: center; gap: 16px;
-        }
+        .header-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
         .status-pill {
             display: flex; align-items: center; gap: 6px;
-            padding: 5px 14px; border-radius: 20px; font-size: 12px;
+            padding: 5px 12px; border-radius: 20px; font-size: 12px;
             font-weight: 600; border: 1px solid;
         }
 
@@ -86,9 +84,17 @@
         .status-pill.online { background: var(--green-dim); border-color: var(--green); color: var(--green); }
         .status-pill.reconnecting { background: rgba(251, 191, 36, 0.15); border-color: var(--yellow); color: var(--yellow); }
 
-        .status-dot {
-            width: 8px; height: 8px; border-radius: 50%;
+        .info-pill {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 12px; border-radius: 20px; font-size: 12px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            font-family: var(--mono);
         }
+        .info-pill .pill-label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+        .info-pill .pill-value { color: var(--text-bright); font-weight: 600; }
+        .info-pill.hidden { display: none; }
+
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
         .status-dot.offline { background: var(--red); }
         .status-dot.online { background: var(--green); animation: pulse-dot 2s infinite; }
         .status-dot.reconnecting { background: var(--yellow); animation: pulse-dot 1s infinite; }
@@ -101,9 +107,8 @@
         /* ===== LAYOUT ===== */
         .main-layout {
             display: grid;
-            grid-template-columns: 300px 1fr 320px;
-            gap: 0;
-            height: calc(100vh - 57px);
+            grid-template-columns: 290px 1fr 350px;
+            height: calc(100vh - 55px);
         }
 
         .panel {
@@ -112,11 +117,12 @@
             scrollbar-width: thin;
             scrollbar-color: var(--border) transparent;
         }
-
+        .panel::-webkit-scrollbar { width: 8px; }
+        .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
         .panel:last-child { border-right: none; }
 
         .panel-header {
-            padding: 16px 16px 12px;
+            padding: 14px 16px 11px;
             font-size: 11px; font-weight: 600;
             text-transform: uppercase; letter-spacing: 1.5px;
             color: var(--text-dim);
@@ -126,30 +132,30 @@
             z-index: 10;
         }
 
-        /* ===== LEFT PANEL - CONTROL ===== */
+        /* ===== LEFT PANEL ===== */
         .left-panel { background: var(--bg-secondary); }
 
-        .control-section {
-            padding: 16px; border-bottom: 1px solid var(--border);
-        }
+        .control-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
 
         .control-section h3 {
-            font-size: 12px; font-weight: 600; color: var(--text-dim);
+            font-size: 11px; font-weight: 600; color: var(--text-dim);
             text-transform: uppercase; letter-spacing: 1px;
-            margin-bottom: 12px;
+            margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
         }
+        .control-section h3 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 10px; }
 
-        .form-group { margin-bottom: 12px; }
+        .form-group { margin-bottom: 10px; }
 
         .form-group label {
-            display: block; font-size: 12px; color: var(--text-dim);
-            margin-bottom: 4px;
+            display: flex; justify-content: space-between;
+            font-size: 12px; color: var(--text-dim); margin-bottom: 4px;
         }
+        .form-group label .val { font-family: var(--mono); color: var(--text); }
 
-        .form-group select, .form-group input {
+        .form-group select, .form-group input[type=number], .form-group input[type=text] {
             width: 100%; padding: 8px 10px; border-radius: 6px;
             background: var(--bg); border: 1px solid var(--border);
-            color: var(--text); font-size: 13px; font-family: 'JetBrains Mono', monospace;
+            color: var(--text); font-size: 13px; font-family: var(--mono);
             outline: none; transition: border-color 0.2s;
         }
 
@@ -158,134 +164,176 @@
             box-shadow: 0 0 0 2px var(--accent-glow);
         }
 
+        input[type=range] {
+            width: 100%; accent-color: var(--accent); background: transparent;
+        }
+
         .btn {
-            width: 100%; padding: 10px 16px; border: none; border-radius: 8px;
+            width: 100%; padding: 9px 14px; border: none; border-radius: 8px;
             font-size: 13px; font-weight: 600; cursor: pointer;
             transition: all 0.2s; display: flex; align-items: center;
             justify-content: center; gap: 6px;
         }
 
-        .btn-primary {
-            background: linear-gradient(135deg, #3b82f6, #6366f1);
-            color: white;
-        }
+        .btn-primary { background: linear-gradient(135deg, #3b82f6, #6366f1); color: white; }
         .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(99,102,241,0.4); }
-
-        .btn-danger {
-            background: linear-gradient(135deg, #ef4444, #dc2626);
-            color: white;
-        }
+        .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
         .btn-danger:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(239,68,68,0.4); }
-
-        .btn-secondary {
-            background: var(--bg); color: var(--text); border: 1px solid var(--border);
-        }
+        .btn-secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
         .btn-secondary:hover { background: var(--bg-card); border-color: var(--accent); }
-
-        .btn:disabled {
-            opacity: 0.5; cursor: not-allowed; transform: none !important;
-            box-shadow: none !important;
-        }
+        .btn-sm { padding: 6px 10px; font-size: 11px; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+        .btn-row { display: flex; gap: 6px; }
 
         /* Frequency quick picks */
-        .freq-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+        .freq-group-label {
+            font-size: 10px; color: var(--text-dim); text-transform: uppercase;
+            letter-spacing: 1px; margin: 10px 0 6px;
         }
+        .freq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 
         .freq-chip {
             padding: 6px 8px; border-radius: 6px; font-size: 11px;
             background: var(--bg); border: 1px solid var(--border);
             cursor: pointer; transition: all 0.15s; text-align: center;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: var(--mono);
         }
-
         .freq-chip:hover { border-color: var(--accent); background: var(--bg-card); }
-        .freq-chip.active { border-color: var(--accent); background: rgba(96,165,250,0.1); color: var(--accent); }
-
+        .freq-chip.active { border-color: var(--accent); background: rgba(96,165,250,0.12); color: var(--accent); }
         .freq-chip .freq-val { font-weight: 600; font-size: 12px; }
         .freq-chip .freq-label { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+        .freq-chip.has-history { border-left: 2px solid var(--green); }
 
         /* Node list */
         .node-item {
             display: flex; align-items: center; gap: 8px;
-            padding: 8px 12px; border-radius: 6px; cursor: pointer;
-            transition: background 0.15s; margin-bottom: 4px;
+            padding: 7px 10px; border-radius: 6px; cursor: pointer;
+            transition: background 0.15s; margin-bottom: 3px;
+            border: 1px solid transparent;
         }
-
         .node-item:hover { background: var(--bg-card); }
-        .node-item.selected { background: rgba(96,165,250,0.1); border: 1px solid var(--accent); }
-
-        .node-dot {
-            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-        }
+        .node-item.selected { background: rgba(96,165,250,0.1); border-color: var(--accent); }
+        .node-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .node-dot.available { background: var(--green); }
         .node-dot.unavailable { background: var(--red); opacity: 0.5; }
         .node-dot.unknown { background: var(--text-dim); }
-
         .node-info { flex: 1; min-width: 0; }
         .node-name { font-size: 12px; font-weight: 500; }
         .node-detail { font-size: 10px; color: var(--text-dim); }
 
         /* ===== CENTER PANEL ===== */
-        .center-panel { background: var(--bg); display: flex; flex-direction: column; }
+        .center-panel { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
 
-        /* Meter section */
         .meter-section {
-            padding: 24px; border-bottom: 1px solid var(--border);
+            padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
             background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
+            flex-shrink: 0;
         }
 
         .meter-display {
-            display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
-            gap: 16px; margin-bottom: 20px;
+            display: grid; grid-template-columns: repeat(5, 1fr);
+            gap: 10px; margin-bottom: 12px;
         }
 
         .meter-card {
             background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: 12px; padding: 16px; text-align: center;
+            border-radius: 10px; padding: 10px 12px; text-align: center;
             transition: border-color 0.3s;
         }
+        .meter-card.active { border-color: var(--green); box-shadow: 0 0 20px rgba(52,211,153,0.12); }
 
-        .meter-card.active { border-color: var(--green); box-shadow: 0 0 20px rgba(52,211,153,0.1); }
-
-        .meter-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 6px; }
-        .meter-value {
-            font-family: 'JetBrains Mono', monospace; font-size: 28px;
-            font-weight: 700; line-height: 1;
-        }
-        .meter-unit { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+        .meter-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px; }
+        .meter-value { font-family: var(--mono); font-size: 24px; font-weight: 700; line-height: 1.1; }
+        .meter-unit { font-size: 10px; color: var(--text-dim); margin-top: 3px; }
 
         .meter-value.blue { color: var(--accent); }
         .meter-value.green { color: var(--green); }
         .meter-value.yellow { color: var(--yellow); }
         .meter-value.purple { color: var(--purple); }
+        .meter-value.cyan { color: var(--cyan); }
 
-        /* RMS Chart */
-        .chart-container {
-            flex: 1; padding: 16px; min-height: 200px;
-            display: flex; flex-direction: column;
+        /* S-meter bar */
+        .smeter-bar {
+            height: 5px; border-radius: 3px; background: var(--bg);
+            overflow: hidden; margin-top: 6px; position: relative;
+        }
+        .smeter-fill {
+            height: 100%; width: 0%; border-radius: 3px;
+            background: linear-gradient(90deg, #22d3ee, #34d399, #fbbf24);
+            transition: width .15s;
         }
 
-        .chart-title {
-            font-size: 12px; font-weight: 600; color: var(--text-dim);
-            text-transform: uppercase; letter-spacing: 1px;
-            margin-bottom: 12px;
+        .signal-bar-wrap { position: relative; height: 8px; }
+        .signal-bar-track {
+            height: 8px; border-radius: 4px; background: var(--bg);
+            overflow: hidden; border: 1px solid var(--border);
+        }
+        #signalBar {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #3b82f6, #6366f1);
+            border-radius: 4px; transition: width 0.15s;
+        }
+        .squelch-marker {
+            position: absolute; top: -3px; width: 2px; height: 14px;
+            background: var(--red); left: 0; transition: left .2s;
+        }
+        .squelch-marker::after {
+            content: 'SQ'; position: absolute; top: -12px; left: -6px;
+            font-size: 8px; color: var(--red); font-family: var(--mono);
         }
 
-        #rmsCanvas {
-            width: 100%; flex: 1; border-radius: 8px;
+        /* Spectrum + waterfall */
+        .display-stack { flex: 1; display: flex; flex-direction: column; padding: 12px 16px 8px; gap: 8px; min-height: 0; }
+
+        .display-box {
             background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
         }
+        .display-box.grow { flex: 1; min-height: 160px; }
+
+        .display-title {
+            font-size: 10px; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 1px;
+            padding: 7px 12px; border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .display-title .readout { font-family: var(--mono); color: var(--text); text-transform: none; letter-spacing: 0; }
+        .display-title .readout span { color: var(--text-dim); }
+
+        .display-box canvas { width: 100%; display: block; flex: 1; }
+        #rmsCanvas { height: 108px; }
 
         /* ===== RIGHT PANEL ===== */
-        .right-panel { background: var(--bg-secondary); }
+        .right-panel { background: var(--bg-secondary); display: flex; flex-direction: column; overflow: hidden; }
 
-        .signal-log { padding: 0; }
+        .tab-bar {
+            display: flex; border-bottom: 1px solid var(--border);
+            background: var(--bg-secondary); position: sticky; top: 0; z-index: 10;
+        }
+        .tab {
+            flex: 1; padding: 12px 8px; font-size: 12px; font-weight: 600;
+            text-align: center; cursor: pointer; color: var(--text-dim);
+            border-bottom: 2px solid transparent; transition: all .15s;
+        }
+        .tab:hover { color: var(--text); background: var(--bg-card); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .tab .badge {
+            display: inline-block; margin-left: 4px; padding: 1px 5px;
+            border-radius: 8px; background: var(--bg-card); font-size: 10px;
+            font-family: var(--mono);
+        }
+
+        .tab-content { flex: 1; overflow-y: auto; scrollbar-width: thin; }
+        .tab-content::-webkit-scrollbar { width: 8px; }
+        .tab-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
 
         .signal-entry {
-            padding: 12px 16px; border-bottom: 1px solid var(--border);
+            padding: 10px 14px; border-bottom: 1px solid var(--border);
             animation: fadeInSlide 0.3s ease;
         }
+        .signal-entry:hover { background: var(--bg-card); }
 
         @keyframes fadeInSlide {
             from { opacity: 0; transform: translateX(20px); }
@@ -294,51 +342,90 @@
 
         .signal-entry-header {
             display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 4px;
+            margin-bottom: 5px; gap: 8px;
         }
-
-        .signal-number {
-            font-size: 11px; font-weight: 700; color: var(--accent);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .signal-time { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
-
+        .signal-number { font-size: 11px; font-weight: 700; color: var(--accent); font-family: var(--mono); }
+        .signal-time { font-size: 10px; color: var(--text-dim); font-family: var(--mono); }
         .signal-detail { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
-        .signal-detail strong { color: var(--text); font-weight: 500; }
-
-        .signal-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+        .signal-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
 
         .tag {
             font-size: 9px; padding: 2px 6px; border-radius: 4px;
-            font-weight: 600; text-transform: uppercase;
+            font-weight: 600; text-transform: uppercase; font-family: var(--mono);
         }
         .tag-freq { background: rgba(96,165,250,0.15); color: var(--accent); }
         .tag-dur { background: rgba(52,211,153,0.15); color: var(--green); }
         .tag-rms { background: rgba(167,139,250,0.15); color: var(--purple); }
+        .tag-snr { background: rgba(34,211,238,0.15); color: var(--cyan); }
+        .tag-mod { background: rgba(251,191,36,0.15); color: var(--yellow); }
+        .tag-weak { background: rgba(113,128,150,0.15); color: var(--text-dim); }
 
-        /* Stats section */
-        .stats-mini { padding: 12px 16px; border-bottom: 1px solid var(--border); }
-        .stats-mini h4 {
-            font-size: 11px; font-weight: 600; color: var(--text-dim);
-            text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+        .play-btn {
+            width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+            border: 1px solid var(--border); background: var(--bg);
+            color: var(--accent); cursor: pointer; font-size: 11px;
+            display: flex; align-items: center; justify-content: center;
+            transition: all .15s;
+        }
+        .play-btn:hover { border-color: var(--accent); background: var(--bg-card); }
+        .play-btn.playing { background: var(--accent); color: #0a0e17; border-color: var(--accent); }
+        .play-btn:disabled { opacity: .3; cursor: not-allowed; }
+        .row-actions { display: flex; gap: 4px; flex-shrink: 0; margin-left: auto; }
+
+        .spec-thumb {
+            width: 100%; height: 74px; margin-top: 8px; border-radius: 6px;
+            background: var(--bg); border: 1px solid var(--border); display: block;
         }
 
+        /* Stats */
+        .stats-block { padding: 14px 14px 4px; border-bottom: 1px solid var(--border); }
+        .stats-block h4 {
+            font-size: 11px; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;
+            display: flex; justify-content: space-between;
+        }
         .stat-row {
             display: flex; justify-content: space-between; align-items: center;
             padding: 3px 0; font-size: 12px;
         }
         .stat-row .stat-label { color: var(--text-dim); }
-        .stat-row .stat-val { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+        .stat-row .stat-val { font-family: var(--mono); font-weight: 600; }
 
-        /* Empty state */
-        .empty-state {
-            text-align: center; padding: 40px 20px; color: var(--text-dim);
+        .bar-row { margin-bottom: 8px; }
+        .bar-row .bar-head {
+            display: flex; justify-content: space-between; font-size: 11px;
+            margin-bottom: 3px; font-family: var(--mono);
         }
-        .empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.3; }
-        .empty-state p { font-size: 13px; }
+        .bar-row .bar-head .bar-name { color: var(--text); }
+        .bar-row .bar-head .bar-num { color: var(--text-dim); }
+        .bar-track { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+        .bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+        .bar-fill.green { background: linear-gradient(90deg, var(--green), var(--cyan)); }
+        .bar-fill.yellow { background: linear-gradient(90deg, var(--yellow), #f59e0b); }
 
-        /* Loading spinner */
+        .hour-strip { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; margin-top: 4px; }
+        .hour-cell { height: 28px; border-radius: 2px; background: var(--bg); position: relative; }
+        .hour-labels {
+            display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px;
+            font-size: 8px; color: var(--text-dim); font-family: var(--mono); margin-top: 3px;
+        }
+        .hour-labels span { text-align: center; }
+
+        .filter-bar {
+            display: flex; gap: 6px; padding: 10px 14px;
+            border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap;
+        }
+        .filter-bar select, .filter-bar input {
+            padding: 5px 8px; border-radius: 6px; background: var(--bg);
+            border: 1px solid var(--border); color: var(--text);
+            font-size: 11px; font-family: var(--mono); outline: none;
+        }
+        .filter-bar label { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 4px; }
+
+        .empty-state { text-align: center; padding: 36px 20px; color: var(--text-dim); }
+        .empty-state .empty-icon { font-size: 32px; margin-bottom: 10px; opacity: 0.3; }
+        .empty-state p { font-size: 13px; line-height: 1.6; }
+
         .spinner {
             width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2);
             border-top-color: white; border-radius: 50%;
@@ -346,52 +433,47 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* Responsive */
-        @media (max-width: 1100px) {
-            .main-layout { grid-template-columns: 260px 1fr; }
-            .right-panel { display: none; }
-        }
-
-        @media (max-width: 768px) {
-            .main-layout { grid-template-columns: 1fr; }
-            .left-panel { display: none; }
-        }
-
-        /* Signal active glow animation on the whole meter section */
         .meter-section.signal-active {
-            background: linear-gradient(180deg, rgba(52,211,153,0.05) 0%, var(--bg) 100%);
+            background: linear-gradient(180deg, rgba(52,211,153,0.06) 0%, var(--bg) 100%);
         }
 
         /* ===== RECONNECTION BANNER ===== */
         .reconnect-banner {
-            display: none;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 20px;
+            display: none; align-items: center; gap: 10px;
+            padding: 9px 20px;
             background: linear-gradient(90deg, rgba(251,191,36,0.12), rgba(251,191,36,0.05));
             border-bottom: 1px solid rgba(251,191,36,0.3);
-            color: var(--yellow);
-            font-size: 13px;
-            font-weight: 500;
+            color: var(--yellow); font-size: 13px; font-weight: 500;
             animation: reconnectPulse 2s ease-in-out infinite;
         }
         .reconnect-banner.visible { display: flex; }
-        .reconnect-banner .reconnect-icon {
-            font-size: 18px;
-            animation: spin 1.5s linear infinite;
-        }
+        .reconnect-banner .reconnect-icon { font-size: 18px; animation: spin 1.5s linear infinite; }
         .reconnect-banner .reconnect-text { flex: 1; }
         .reconnect-banner .reconnect-attempt {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            background: rgba(251,191,36,0.15);
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-weight: 600;
+            font-family: var(--mono); font-size: 11px;
+            background: rgba(251,191,36,0.15); padding: 3px 8px;
+            border-radius: 4px; font-weight: 600;
         }
-        @keyframes reconnectPulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
+        @keyframes reconnectPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+        .toast {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: var(--bg-card); border: 1px solid var(--border);
+            padding: 10px 18px; border-radius: 8px; font-size: 13px;
+            z-index: 200; opacity: 0; transition: opacity .25s; pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+        .toast.error { border-color: var(--red); color: var(--red); }
+        .toast.ok { border-color: var(--green); color: var(--green); }
+
+        @media (max-width: 1250px) {
+            .main-layout { grid-template-columns: 260px 1fr; }
+            .right-panel { display: none; }
+            .meter-display { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 820px) {
+            .main-layout { grid-template-columns: 1fr; }
+            .left-panel { display: none; }
         }
     </style>
 </head>
@@ -406,6 +488,18 @@
             </div>
         </div>
         <div class="header-status">
+            <div class="info-pill hidden" id="pillTune">
+                <span class="pill-label">TUNED</span>
+                <span class="pill-value" id="pillTuneVal">--</span>
+            </div>
+            <div class="info-pill hidden" id="pillNode">
+                <span class="pill-label">NODE</span>
+                <span class="pill-value" id="pillNodeVal">--</span>
+            </div>
+            <div class="info-pill hidden" id="pillDrops">
+                <span class="pill-label">DROPS</span>
+                <span class="pill-value" id="pillDropsVal">0</span>
+            </div>
             <div id="wsStatus" class="status-pill offline">
                 <span class="status-dot offline"></span>
                 <span>Disconnected</span>
@@ -428,17 +522,17 @@
 
             <!-- Quick Frequencies -->
             <div class="control-section">
-                <h3>Quick Frequencies</h3>
-                <div class="freq-grid" id="freqGrid">
-                    <!-- filled by JS -->
-                </div>
+                <h3>Quick Frequencies
+                    <span class="hint"><label style="cursor:pointer"><input type="checkbox" id="showAllFreqs" onchange="renderFrequencies()"> 全部</label></span>
+                </h3>
+                <div id="freqGroups"></div>
             </div>
 
             <!-- Monitor Controls -->
             <div class="control-section">
                 <h3>Monitor Settings</h3>
                 <div class="form-group">
-                    <label>Frequency (kHz)</label>
+                    <label>Frequency <span class="val">kHz</span></label>
                     <input type="number" id="freqInput" value="11175" step="0.1" min="100" max="30000">
                 </div>
                 <div class="form-group">
@@ -456,12 +550,35 @@
                         <option value="">Auto (best available)</option>
                     </select>
                 </div>
-                <button class="btn btn-primary" id="btnStart" onclick="startMonitor()">
-                    Start Monitoring
-                </button>
-                <button class="btn btn-danger" id="btnStop" onclick="stopMonitor()" style="display:none; margin-top:8px;">
-                    Stop Monitoring
-                </button>
+                <button class="btn btn-primary" id="btnStart" onclick="startMonitor()">Start Monitoring</button>
+                <button class="btn btn-danger" id="btnStop" onclick="stopMonitor()" style="display:none; margin-top:8px;">Stop Monitoring</button>
+            </div>
+
+            <!-- Squelch -->
+            <div class="control-section">
+                <h3>Squelch <span class="hint" id="sqState">--</span></h3>
+                <div class="form-group">
+                    <label>开启阈值 <span class="val" id="sqOpenVal">0.100</span></label>
+                    <input type="range" id="sqOpen" min="0.005" max="0.5" step="0.005" value="0.1"
+                           oninput="onSquelchSlide()">
+                </div>
+                <div class="form-group">
+                    <label>关闭阈值 <span class="val" id="sqCloseVal">0.085</span></label>
+                    <input type="range" id="sqClose" min="0.004" max="0.5" step="0.005" value="0.085"
+                           oninput="onSquelchSlide()">
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">实测底噪 (RMS)</span>
+                    <span class="stat-val" id="sqFloor">--</span>
+                </div>
+                <div class="stat-row" style="margin-bottom:8px">
+                    <span class="stat-label">建议阈值 (底噪+6dB)</span>
+                    <span class="stat-val" id="sqSuggest">--</span>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-secondary btn-sm" onclick="applyNoiseFloor()">按底噪设定</button>
+                    <button class="btn btn-primary btn-sm" onclick="applySquelch()">应用</button>
+                </div>
             </div>
 
             <!-- Nodes -->
@@ -476,25 +593,30 @@
             </div>
         </div>
 
-        <!-- CENTER PANEL: Monitor Display -->
+        <!-- CENTER PANEL -->
         <div class="panel center-panel">
-            <!-- Meters -->
             <div class="meter-section" id="meterSection">
                 <div class="meter-display">
                     <div class="meter-card" id="freqCard">
                         <div class="meter-label">Frequency</div>
                         <div class="meter-value blue" id="mFreq">--</div>
-                        <div class="meter-unit">kHz</div>
+                        <div class="meter-unit" id="mMode">kHz</div>
+                    </div>
+                    <div class="meter-card">
+                        <div class="meter-label">S-Meter</div>
+                        <div class="meter-value yellow" id="mSmeter">-127</div>
+                        <div class="meter-unit" id="mSUnit">dBm</div>
+                        <div class="smeter-bar"><div class="smeter-fill" id="smeterFill"></div></div>
+                    </div>
+                    <div class="meter-card">
+                        <div class="meter-label">带内 SNR</div>
+                        <div class="meter-value cyan" id="mSnr">--</div>
+                        <div class="meter-unit" id="mNoiseFloor">底噪 -- dB</div>
                     </div>
                     <div class="meter-card" id="rmsCard">
                         <div class="meter-label">RMS Level</div>
                         <div class="meter-value green" id="mRms">0.0000</div>
-                        <div class="meter-unit">signal energy</div>
-                    </div>
-                    <div class="meter-card">
-                        <div class="meter-label">S-Meter</div>
-                        <div class="meter-value yellow" id="mSmeter">-120</div>
-                        <div class="meter-unit">dBm</div>
+                        <div class="meter-unit" id="mRmsFloor">底噪 --</div>
                     </div>
                     <div class="meter-card">
                         <div class="meter-label">Signals</div>
@@ -503,103 +625,198 @@
                     </div>
                 </div>
 
-                <!-- Signal indicator bar -->
-                <div style="height:6px; border-radius:3px; background:var(--bg); overflow:hidden; position:relative;">
-                    <div id="signalBar" style="height:100%; width:0%; background:linear-gradient(90deg, var(--green), var(--cyan)); border-radius:3px; transition: width 0.15s;"></div>
+                <div class="signal-bar-wrap">
+                    <div class="signal-bar-track"><div id="signalBar"></div></div>
+                    <div class="squelch-marker" id="squelchMarker"></div>
                 </div>
             </div>
 
-            <!-- RMS Chart -->
-            <div class="chart-container">
-                <div class="chart-title">Real-Time Signal Level</div>
-                <canvas id="rmsCanvas"></canvas>
+            <div class="display-stack">
+                <div class="display-box grow">
+                    <div class="display-title">
+                        <span>Spectrum / Waterfall</span>
+                        <span class="readout" id="specReadout"><span>peak</span> -- Hz</span>
+                    </div>
+                    <canvas id="waterfallCanvas"></canvas>
+                </div>
+                <div class="display-box">
+                    <div class="display-title">
+                        <span>Real-Time Signal Level</span>
+                        <span class="readout" id="rmsReadout"><span>rms</span> --</span>
+                    </div>
+                    <canvas id="rmsCanvas"></canvas>
+                </div>
             </div>
         </div>
 
-        <!-- RIGHT PANEL: Signal Log -->
+        <!-- RIGHT PANEL -->
         <div class="panel right-panel">
-            <div class="panel-header">Signal Log</div>
-            <div id="signalLog">
-                <div class="empty-state">
-                    <div class="empty-icon">~</div>
-                    <p>No signals detected yet.<br>Start monitoring to begin.</p>
-                </div>
+            <div class="tab-bar">
+                <div class="tab active" data-tab="live" onclick="switchTab('live')">实时<span class="badge" id="liveBadge">0</span></div>
+                <div class="tab" data-tab="rec" onclick="switchTab('rec')">录音</div>
+                <div class="tab" data-tab="stats" onclick="switchTab('stats')">统计</div>
             </div>
 
-            <!-- Mini stats -->
-            <div class="stats-mini" id="statsSection" style="display:none;">
-                <h4>Session Stats</h4>
-                <div class="stat-row">
-                    <span class="stat-label">Total Signals</span>
-                    <span class="stat-val" id="statTotal">0</span>
+            <div class="tab-content">
+                <!-- LIVE -->
+                <div class="tab-panel active" id="panel-live">
+                    <div id="signalLog">
+                        <div class="empty-state">
+                            <div class="empty-icon">~</div>
+                            <p>还没有检测到信号<br>开始监听后这里会实时追加</p>
+                        </div>
+                    </div>
+                    <div class="stats-block" id="statsSection" style="display:none;">
+                        <h4>Session Stats</h4>
+                        <div class="stat-row"><span class="stat-label">Total Signals</span><span class="stat-val" id="statTotal">0</span></div>
+                        <div class="stat-row"><span class="stat-label">Session Time</span><span class="stat-val" id="statTime">00:00</span></div>
+                        <div class="stat-row"><span class="stat-label">Reconnects</span><span class="stat-val" id="statReconnects">0</span></div>
+                        <div class="stat-row"><span class="stat-label">丢帧</span><span class="stat-val" id="statDrops">0</span></div>
+                        <div class="stat-row"><span class="stat-label">Avg Peak RMS</span><span class="stat-val" id="statAvgRms">--</span></div>
+                        <div class="stat-row"><span class="stat-label">平均带内 SNR</span><span class="stat-val" id="statAvgSnr">--</span></div>
+                    </div>
                 </div>
-                <div class="stat-row">
-                    <span class="stat-label">Session Time</span>
-                    <span class="stat-val" id="statTime">00:00</span>
+
+                <!-- RECORDINGS -->
+                <div class="tab-panel" id="panel-rec">
+                    <div class="filter-bar">
+                        <select id="recDays" onchange="loadRecordings()">
+                            <option value="1">最近 24h</option>
+                            <option value="7" selected>最近 7 天</option>
+                            <option value="30">最近 30 天</option>
+                            <option value="365">全部</option>
+                        </select>
+                        <select id="recSnr" onchange="loadRecordings()">
+                            <option value="">全部 SNR</option>
+                            <option value="6">SNR ≥ 6 dB</option>
+                            <option value="12">SNR ≥ 12 dB</option>
+                            <option value="20">SNR ≥ 20 dB</option>
+                        </select>
+                        <label><input type="checkbox" id="recOnlyAudio" checked onchange="loadRecordings()"> 只看有录音</label>
+                        <button class="btn btn-secondary btn-sm" style="width:auto" onclick="loadRecordings()">刷新</button>
+                    </div>
+                    <div id="recList">
+                        <div class="empty-state"><p>加载中...</p></div>
+                    </div>
                 </div>
-                <div class="stat-row">
-                    <span class="stat-label">Reconnects</span>
-                    <span class="stat-val" id="statReconnects">0</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Avg Peak RMS</span>
-                    <span class="stat-val" id="statAvgRms">--</span>
+
+                <!-- STATS -->
+                <div class="tab-panel" id="panel-stats">
+                    <div class="filter-bar">
+                        <select id="statsDays" onchange="loadStats()">
+                            <option value="1">最近 24h</option>
+                            <option value="7" selected>最近 7 天</option>
+                            <option value="30">最近 30 天</option>
+                            <option value="365">全部</option>
+                        </select>
+                        <button class="btn btn-secondary btn-sm" style="width:auto" onclick="loadStats()">刷新</button>
+                    </div>
+                    <div id="statsBody">
+                        <div class="empty-state"><p>加载中...</p></div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <div class="toast" id="toast"></div>
 
     <script>
         // ============ STATE ============
         let ws = null;
         let monitoring = false;
         let rmsData = [];
-        const MAX_RMS_POINTS = 200;
+        const MAX_RMS_POINTS = 240;
         let signalPeaks = [];
-        let canvas, ctx;
-        let squelchThreshold = 0.15;  // 从服务器获取实际值
+        let signalSnrs = [];
+        let liveCount = 0;
+
+        let squelchOpen = 0.10;
+        let squelchClose = 0.085;
+        let rmsNoiseFloor = 0;
+        let passband = [300, 3000];
+        let specFMax = 4000;
+        let currentMode = 'USB';
+
+        let waterfallRows = [];
+        const WATERFALL_MAX_ROWS = 260;
+        let lastSpectrum = null;
+
+        let allFrequencies = [];
+        let freqHistory = {};
+
+        let rmsCanvas, rmsCtx, wfCanvas, wfCtx, wfOffscreen, wfOffCtx;
+        let audioPlayer = null;
+        let playingId = null;
+
+        // 瀑布图配色 (蓝 -> 青 -> 绿 -> 黄 -> 红)
+        const COLORMAP = (() => {
+            const stops = [
+                [0,   [4, 8, 20]],
+                [0.28,[12, 44, 96]],
+                [0.46,[16, 120, 150]],
+                [0.62,[26, 176, 120]],
+                [0.78,[210, 190, 60]],
+                [0.92,[240, 110, 50]],
+                [1,   [255, 235, 220]],
+            ];
+            const lut = new Uint8Array(256 * 3);
+            for (let i = 0; i < 256; i++) {
+                const v = i / 255;
+                let a = stops[0], b = stops[stops.length - 1];
+                for (let s = 0; s < stops.length - 1; s++) {
+                    if (v >= stops[s][0] && v <= stops[s + 1][0]) { a = stops[s]; b = stops[s + 1]; break; }
+                }
+                const span = (b[0] - a[0]) || 1;
+                const t = (v - a[0]) / span;
+                lut[i * 3] = a[1][0] + (b[1][0] - a[1][0]) * t;
+                lut[i * 3 + 1] = a[1][1] + (b[1][1] - a[1][1]) * t;
+                lut[i * 3 + 2] = a[1][2] + (b[1][2] - a[1][2]) * t;
+            }
+            return lut;
+        })();
 
         // ============ INIT ============
         document.addEventListener('DOMContentLoaded', () => {
-            canvas = document.getElementById('rmsCanvas');
-            ctx = canvas.getContext('2d');
-            resizeCanvas();
-            window.addEventListener('resize', resizeCanvas);
+            rmsCanvas = document.getElementById('rmsCanvas');
+            rmsCtx = rmsCanvas.getContext('2d');
+            wfCanvas = document.getElementById('waterfallCanvas');
+            wfCtx = wfCanvas.getContext('2d');
+            wfOffscreen = document.createElement('canvas');
+            wfOffCtx = wfOffscreen.getContext('2d');
+
+            resizeCanvases();
+            window.addEventListener('resize', resizeCanvases);
 
             loadFrequencies();
             loadNodes();
+            loadSquelch();
             connectWebSocket();
-            drawChart();
+            refreshStatus();
+            drawRmsChart();
+            drawWaterfall();
+
+            setInterval(refreshSquelchFloor, 5000);
         });
 
-        function resizeCanvas() {
-            const rect = canvas.parentElement.getBoundingClientRect();
-            canvas.width = rect.width;
-            canvas.height = Math.max(rect.height - 40, 150);
+        function resizeCanvases() {
+            [rmsCanvas, wfCanvas].forEach(c => {
+                const rect = c.getBoundingClientRect();
+                if (rect.width > 0) c.width = Math.floor(rect.width);
+                if (rect.height > 0) c.height = Math.floor(rect.height);
+            });
+            drawRmsChart();
+            drawWaterfall();
         }
 
         // ============ WEBSOCKET ============
         function connectWebSocket() {
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
             ws = new WebSocket(`${proto}://${location.host}/ws`);
-
-            ws.onopen = () => {
-                setWSStatus(true);
-            };
-
-            ws.onclose = () => {
-                setWSStatus(false);
-                setTimeout(connectWebSocket, 3000);
-            };
-
-            ws.onerror = () => {
-                setWSStatus(false);
-            };
-
-            ws.onmessage = (evt) => {
-                const data = JSON.parse(evt.data);
-                handleWSMessage(data);
-            };
+            ws.onopen = () => setWSStatus(true);
+            ws.onclose = () => { setWSStatus(false); setTimeout(connectWebSocket, 3000); };
+            ws.onerror = () => setWSStatus(false);
+            ws.onmessage = (evt) => handleWSMessage(JSON.parse(evt.data));
         }
 
         function setWSStatus(online) {
@@ -610,31 +827,36 @@
         }
 
         function handleWSMessage(data) {
-            switch(data.type) {
+            switch (data.type) {
                 case 'init':
-                    if (data.squelch_threshold) {
-                        squelchThreshold = data.squelch_threshold;
-                    }
+                    if (data.squelch_threshold) squelchOpen = data.squelch_threshold;
+                    if (data.squelch_close) squelchClose = data.squelch_close;
+                    if (data.passband) passband = data.passband;
+                    if (data.spectrum_f_max) specFMax = data.spectrum_f_max;
+                    if (data.rms_history && data.rms_history.length) rmsData = data.rms_history.slice(-MAX_RMS_POINTS);
+                    syncSquelchInputs();
                     if (data.monitoring) {
                         monitoring = true;
+                        currentMode = data.mode || 'USB';
                         updateMonitorUI(true);
-                        document.getElementById('mFreq').textContent = data.frequency || '--';
+                        setTuneInfo(data.frequency, data.mode, data.node);
                     }
+                    (data.recent_signals || []).forEach(addSignalEntry);
+                    drawRmsChart();
                     break;
 
-                case 'realtime':
-                    updateRealtime(data);
-                    break;
-
-                case 'signal_detected':
-                    addSignalEntry(data);
-                    break;
+                case 'realtime': updateRealtime(data); break;
+                case 'spectrum': updateSpectrum(data); break;
+                case 'signal_detected': addSignalEntry(data); break;
 
                 case 'monitor_started':
                     monitoring = true;
+                    currentMode = data.mode || 'USB';
+                    if (data.passband) passband = data.passband;
                     updateMonitorUI(true);
                     hideReconnectBanner();
-                    document.getElementById('mFreq').textContent = data.frequency;
+                    setTuneInfo(data.frequency, data.mode, data.node);
+                    waterfallRows = [];
                     break;
 
                 case 'monitor_stopped':
@@ -644,6 +866,13 @@
                     if (data.total_reconnects > 0) {
                         addLogEntry('系统', `监听已停止。共重连 ${data.total_reconnects} 次`, 'purple');
                     }
+                    break;
+
+                case 'squelch_updated':
+                    squelchOpen = data.open_threshold;
+                    squelchClose = data.close_threshold;
+                    syncSquelchInputs();
+                    drawRmsChart();
                     break;
 
                 case 'reconnecting':
@@ -663,44 +892,76 @@
 
                 case 'node_switch':
                     addLogEntry('节点切换', data.message, 'cyan');
+                    if (data.node) document.getElementById('pillNodeVal').textContent = data.node;
                     break;
 
                 case 'error':
-                    if (!monitoring) {
-                        updateMonitorUI(false);
-                    }
+                    if (!monitoring) updateMonitorUI(false);
                     addLogEntry('错误', data.message, 'red');
                     break;
             }
         }
 
-        // ============ REALTIME UPDATE ============
+        function setTuneInfo(freq, mode, node) {
+            document.getElementById('mFreq').textContent = freq || '--';
+            document.getElementById('mMode').textContent = `kHz · ${mode || 'USB'}`;
+            const tune = document.getElementById('pillTune');
+            tune.classList.remove('hidden');
+            document.getElementById('pillTuneVal').textContent = `${freq} kHz ${mode || ''}`;
+            if (node) {
+                document.getElementById('pillNode').classList.remove('hidden');
+                document.getElementById('pillNodeVal').textContent = node;
+            }
+        }
+
+        // ============ REALTIME ============
         function updateRealtime(data) {
-            // RMS
             const rms = data.rms || 0;
             rmsData.push(rms);
             if (rmsData.length > MAX_RMS_POINTS) rmsData.shift();
 
             document.getElementById('mRms').textContent = rms.toFixed(4);
-            document.getElementById('mSmeter').textContent = (data.smeter || -120).toFixed(0);
+            document.getElementById('rmsReadout').innerHTML =
+                `<span>rms</span> ${rms.toFixed(4)}`;
+
+            // S-meter: KiwiSDR 修好帧解析后才是真实读数
+            const smeter = data.smeter != null ? data.smeter : -127;
+            document.getElementById('mSmeter').textContent = smeter.toFixed(0);
+            document.getElementById('mSUnit').textContent = `dBm · ${dbmToSUnit(smeter)}`;
+            const smPct = Math.max(0, Math.min(100, ((smeter + 127) / 90) * 100));
+            document.getElementById('smeterFill').style.width = smPct + '%';
+
+            if (data.snr_db != null) {
+                document.getElementById('mSnr').textContent = data.snr_db.toFixed(1);
+            }
+            if (data.noise_floor_db != null) {
+                document.getElementById('mNoiseFloor').textContent =
+                    `底噪 ${data.noise_floor_db.toFixed(0)} dB`;
+            }
+            if (data.rms_noise_floor != null && data.rms_noise_floor > 0) {
+                rmsNoiseFloor = data.rms_noise_floor;
+                document.getElementById('mRmsFloor').textContent = `底噪 ${rmsNoiseFloor.toFixed(4)}`;
+            }
+
             document.getElementById('mSignals').textContent = data.total_signals || 0;
 
-            // Elapsed time
             const elapsed = data.elapsed || 0;
             const hrs = Math.floor(elapsed / 3600);
             const mins = Math.floor((elapsed % 3600) / 60);
             const secs = Math.floor(elapsed % 60);
-            const elapsedStr = hrs > 0 ? `${hrs}h ${mins}m ${secs}s` : `${mins}m ${secs}s`;
-            document.getElementById('mElapsed').textContent = `${elapsedStr} elapsed`;
+            document.getElementById('mElapsed').textContent =
+                (hrs > 0 ? `${hrs}h ${mins}m ${secs}s` : `${mins}m ${secs}s`) + ' elapsed';
 
-            // Signal bar
-            const barWidth = Math.min(rms * 2000, 100);
-            document.getElementById('signalBar').style.width = barWidth + '%';
+            // 信号条 + 静噪标记
+            const scaleMax = Math.max(squelchOpen * 2.5, 0.05);
+            document.getElementById('signalBar').style.width =
+                Math.min((rms / scaleMax) * 100, 100) + '%';
             document.getElementById('signalBar').style.background = data.signal_active
-                ? 'linear-gradient(90deg, #34d399, #22d3ee, #60a5fa)' 
+                ? 'linear-gradient(90deg, #34d399, #22d3ee, #60a5fa)'
                 : 'linear-gradient(90deg, #3b82f6, #6366f1)';
+            document.getElementById('squelchMarker').style.left =
+                Math.min((squelchOpen / scaleMax) * 100, 100) + '%';
 
-            // Card glow
             const rmsCard = document.getElementById('rmsCard');
             if (data.signal_active) {
                 rmsCard.classList.add('active');
@@ -710,122 +971,246 @@
                 document.getElementById('meterSection').classList.remove('signal-active');
             }
 
-            // Stats
+            if (data.dropped_frames != null && data.dropped_frames > 0) {
+                document.getElementById('pillDrops').classList.remove('hidden');
+                document.getElementById('pillDropsVal').textContent = data.dropped_frames;
+                document.getElementById('statDrops').textContent = data.dropped_frames;
+            }
+
             document.getElementById('statTotal').textContent = data.total_signals || 0;
-            const timeStr = hrs > 0 ? `${hrs}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}` : `${mins}:${secs.toString().padStart(2,'0')}`;
-            document.getElementById('statTime').textContent = timeStr;
+            document.getElementById('statTime').textContent = hrs > 0
+                ? `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+                : `${mins}:${String(secs).padStart(2, '0')}`;
             document.getElementById('statReconnects').textContent = data.reconnects || 0;
 
-            drawChart();
+            drawRmsChart();
         }
 
-        // ============ RMS CHART ============
-        function drawChart() {
-            if (!ctx || !canvas.width) return;
-            const w = canvas.width, h = canvas.height;
-            const padding = { top: 10, right: 10, bottom: 20, left: 50 };
-            const plotW = w - padding.left - padding.right;
-            const plotH = h - padding.top - padding.bottom;
+        function dbmToSUnit(dbm) {
+            // HF 惯例: S9 = -73 dBm, 每个 S 级 6 dB
+            if (dbm >= -73) return 'S9+' + Math.round(dbm + 73);
+            const s = Math.floor((dbm + 127) / 6);
+            return 'S' + Math.max(0, Math.min(9, s));
+        }
 
-            ctx.clearRect(0, 0, w, h);
+        // ============ SPECTRUM / WATERFALL ============
+        function updateSpectrum(data) {
+            lastSpectrum = data;
+            if (data.f_max) specFMax = data.f_max;
+            waterfallRows.push(data.bins);
+            if (waterfallRows.length > WATERFALL_MAX_ROWS) waterfallRows.shift();
 
-            // Background
-            ctx.fillStyle = '#111827';
-            ctx.fillRect(0, 0, w, h);
+            document.getElementById('specReadout').innerHTML =
+                `<span>peak</span> ${Math.round(data.peak_frequency_hz)} Hz ` +
+                `<span>snr</span> ${data.snr_db.toFixed(1)} dB ` +
+                `<span>nf</span> ${data.noise_floor_db.toFixed(0)} dB`;
 
-            if (rmsData.length < 2) {
-                ctx.fillStyle = '#4a5568';
-                ctx.font = '13px Inter';
-                ctx.textAlign = 'center';
-                ctx.fillText('Waiting for data...', w/2, h/2);
+            drawWaterfall();
+        }
+
+        function drawWaterfall() {
+            if (!wfCtx || !wfCanvas.width) return;
+            const w = wfCanvas.width, h = wfCanvas.height;
+            const specH = Math.min(96, Math.floor(h * 0.34));
+            const axisH = 16;
+            const wfH = h - specH - axisH;
+
+            wfCtx.fillStyle = '#0a0e17';
+            wfCtx.fillRect(0, 0, w, h);
+
+            if (!waterfallRows.length) {
+                wfCtx.fillStyle = '#4a5568';
+                wfCtx.font = '13px Inter, sans-serif';
+                wfCtx.textAlign = 'center';
+                wfCtx.fillText(monitoring ? '等待频谱数据...' : '开始监听后显示实时频谱与瀑布图', w / 2, h / 2);
                 return;
             }
 
-            // Grid lines
-            const maxRms = Math.max(...rmsData, squelchThreshold * 1.2, 0.05);
-            const gridLines = 5;
-            ctx.strokeStyle = '#1e293b';
-            ctx.lineWidth = 1;
-            ctx.font = '10px JetBrains Mono';
-            ctx.fillStyle = '#64748b';
-            ctx.textAlign = 'right';
+            const nBins = waterfallRows[0].length;
 
-            for (let i = 0; i <= gridLines; i++) {
-                const y = padding.top + (plotH * i / gridLines);
-                const val = maxRms * (1 - i / gridLines);
-                ctx.beginPath();
-                ctx.moveTo(padding.left, y);
-                ctx.lineTo(w - padding.right, y);
-                ctx.stroke();
-                ctx.fillText(val.toFixed(3), padding.left - 5, y + 3);
+            // --- 瀑布图 ---
+            if (wfH > 10) {
+                const rows = waterfallRows.length;
+                wfOffscreen.width = nBins;
+                wfOffscreen.height = rows;
+                const img = wfOffCtx.createImageData(nBins, rows);
+                for (let y = 0; y < rows; y++) {
+                    const row = waterfallRows[rows - 1 - y];   // 最新的在上
+                    for (let x = 0; x < nBins; x++) {
+                        const v = row[x] | 0;
+                        const o = (y * nBins + x) * 4;
+                        img.data[o] = COLORMAP[v * 3];
+                        img.data[o + 1] = COLORMAP[v * 3 + 1];
+                        img.data[o + 2] = COLORMAP[v * 3 + 2];
+                        img.data[o + 3] = 255;
+                    }
+                }
+                wfOffCtx.putImageData(img, 0, 0);
+                wfCtx.imageSmoothingEnabled = true;
+                wfCtx.drawImage(wfOffscreen, 0, 0, nBins, rows,
+                                0, specH, w, wfH);
             }
 
-            // Threshold line (使用实际配置的静噪阈值)
-            const threshY = padding.top + plotH * (1 - squelchThreshold / maxRms);
-            if (threshY > padding.top && threshY < h - padding.bottom) {
-                ctx.strokeStyle = 'rgba(248, 113, 113, 0.4)';
-                ctx.setLineDash([4, 4]);
-                ctx.beginPath();
-                ctx.moveTo(padding.left, threshY);
-                ctx.lineTo(w - padding.right, threshY);
-                ctx.stroke();
-                ctx.setLineDash([]);
-                ctx.fillStyle = '#f87171';
-                ctx.textAlign = 'left';
-                ctx.fillText(`SQUELCH ${squelchThreshold.toFixed(2)}`, w - padding.right - 100, threshY - 4);
+            // --- 频谱曲线 ---
+            const spec = waterfallRows[waterfallRows.length - 1];
+            wfCtx.fillStyle = '#111827';
+            wfCtx.fillRect(0, 0, w, specH);
+
+            // 通带阴影
+            const x0 = (passband[0] / specFMax) * w;
+            const x1 = (passband[1] / specFMax) * w;
+            wfCtx.fillStyle = 'rgba(96,165,250,0.07)';
+            wfCtx.fillRect(x0, 0, Math.max(x1 - x0, 1), specH);
+            wfCtx.strokeStyle = 'rgba(96,165,250,0.25)';
+            wfCtx.lineWidth = 1;
+            [x0, x1].forEach(x => {
+                wfCtx.beginPath();
+                wfCtx.moveTo(x, 0); wfCtx.lineTo(x, specH); wfCtx.stroke();
+            });
+
+            wfCtx.beginPath();
+            for (let i = 0; i < spec.length; i++) {
+                const x = (i / (spec.length - 1)) * w;
+                const y = specH - (spec[i] / 255) * (specH - 4) - 2;
+                i === 0 ? wfCtx.moveTo(x, y) : wfCtx.lineTo(x, y);
             }
+            wfCtx.strokeStyle = '#22d3ee';
+            wfCtx.lineWidth = 1.4;
+            wfCtx.stroke();
 
-            // RMS line with gradient fill
-            const stepX = plotW / (MAX_RMS_POINTS - 1);
-            const startIdx = Math.max(0, rmsData.length - MAX_RMS_POINTS);
+            wfCtx.lineTo(w, specH); wfCtx.lineTo(0, specH); wfCtx.closePath();
+            const g = wfCtx.createLinearGradient(0, 0, 0, specH);
+            g.addColorStop(0, 'rgba(34,211,238,0.28)');
+            g.addColorStop(1, 'rgba(34,211,238,0.02)');
+            wfCtx.fillStyle = g;
+            wfCtx.fill();
 
-            // Fill gradient under curve
-            const gradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
-            gradient.addColorStop(0, 'rgba(96, 165, 250, 0.3)');
-            gradient.addColorStop(1, 'rgba(96, 165, 250, 0.01)');
-
-            ctx.beginPath();
-            ctx.moveTo(padding.left, h - padding.bottom);
-            for (let i = startIdx; i < rmsData.length; i++) {
-                const x = padding.left + (i - startIdx) * stepX;
-                const y = padding.top + plotH * (1 - rmsData[i] / maxRms);
-                ctx.lineTo(x, y);
-            }
-            ctx.lineTo(padding.left + (rmsData.length - 1 - startIdx) * stepX, h - padding.bottom);
-            ctx.closePath();
-            ctx.fillStyle = gradient;
-            ctx.fill();
-
-            // Line
-            ctx.beginPath();
-            for (let i = startIdx; i < rmsData.length; i++) {
-                const x = padding.left + (i - startIdx) * stepX;
-                const y = padding.top + plotH * (1 - rmsData[i] / maxRms);
-                if (i === startIdx) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            }
-            ctx.strokeStyle = '#60a5fa';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-
-            // Current value dot
-            if (rmsData.length > 0) {
-                const lastX = padding.left + (rmsData.length - 1 - startIdx) * stepX;
-                const lastY = padding.top + plotH * (1 - rmsData[rmsData.length-1] / maxRms);
-                ctx.beginPath();
-                ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-                ctx.fillStyle = rmsData[rmsData.length-1] > squelchThreshold ? '#34d399' : '#60a5fa';
-                ctx.fill();
-                ctx.strokeStyle = '#0a0e17';
-                ctx.lineWidth = 2;
-                ctx.stroke();
+            // --- 频率轴 ---
+            wfCtx.fillStyle = '#111827';
+            wfCtx.fillRect(0, h - axisH, w, axisH);
+            wfCtx.fillStyle = '#64748b';
+            wfCtx.font = '9px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+            wfCtx.textAlign = 'center';
+            const step = specFMax <= 4000 ? 500 : 1000;
+            for (let f = 0; f <= specFMax; f += step) {
+                const x = (f / specFMax) * w;
+                wfCtx.fillText(f >= 1000 ? (f / 1000) + 'k' : f, x, h - 5);
+                wfCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+                wfCtx.beginPath();
+                wfCtx.moveTo(x, specH); wfCtx.lineTo(x, h - axisH); wfCtx.stroke();
             }
         }
 
+        // ============ RMS CHART ============
+        function drawRmsChart() {
+            if (!rmsCtx || !rmsCanvas.width) return;
+            const w = rmsCanvas.width, h = rmsCanvas.height;
+            const pad = { top: 8, right: 8, bottom: 6, left: 46 };
+            const plotW = w - pad.left - pad.right;
+            const plotH = h - pad.top - pad.bottom;
+
+            rmsCtx.clearRect(0, 0, w, h);
+            rmsCtx.fillStyle = '#111827';
+            rmsCtx.fillRect(0, 0, w, h);
+
+            if (rmsData.length < 2) {
+                rmsCtx.fillStyle = '#4a5568';
+                rmsCtx.font = '12px Inter, sans-serif';
+                rmsCtx.textAlign = 'center';
+                rmsCtx.fillText('Waiting for data...', w / 2, h / 2);
+                return;
+            }
+
+            const maxRms = Math.max(...rmsData, squelchOpen * 1.3, 0.05);
+            const gridLines = 4;
+            rmsCtx.strokeStyle = '#1e293b';
+            rmsCtx.lineWidth = 1;
+            rmsCtx.font = '9px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+            rmsCtx.fillStyle = '#64748b';
+            rmsCtx.textAlign = 'right';
+
+            for (let i = 0; i <= gridLines; i++) {
+                const y = pad.top + (plotH * i / gridLines);
+                rmsCtx.beginPath();
+                rmsCtx.moveTo(pad.left, y); rmsCtx.lineTo(w - pad.right, y); rmsCtx.stroke();
+                rmsCtx.fillText((maxRms * (1 - i / gridLines)).toFixed(3), pad.left - 5, y + 3);
+            }
+
+            const yOf = v => pad.top + plotH * (1 - v / maxRms);
+
+            // 噪声基底线
+            if (rmsNoiseFloor > 0) {
+                const y = yOf(rmsNoiseFloor);
+                rmsCtx.strokeStyle = 'rgba(113,128,150,0.5)';
+                rmsCtx.setLineDash([2, 3]);
+                rmsCtx.beginPath();
+                rmsCtx.moveTo(pad.left, y); rmsCtx.lineTo(w - pad.right, y); rmsCtx.stroke();
+                rmsCtx.setLineDash([]);
+                rmsCtx.fillStyle = '#718096';
+                rmsCtx.textAlign = 'left';
+                rmsCtx.fillText('NOISE FLOOR', pad.left + 4, y - 3);
+            }
+
+            // 静噪阈值线 (开/关)
+            [[squelchOpen, 'rgba(248,113,113,0.55)', 'SQUELCH OPEN'],
+             [squelchClose, 'rgba(248,113,113,0.28)', 'CLOSE']].forEach(([val, color, label]) => {
+                const y = yOf(val);
+                if (y <= pad.top || y >= h - pad.bottom) return;
+                rmsCtx.strokeStyle = color;
+                rmsCtx.setLineDash([4, 4]);
+                rmsCtx.beginPath();
+                rmsCtx.moveTo(pad.left, y); rmsCtx.lineTo(w - pad.right, y); rmsCtx.stroke();
+                rmsCtx.setLineDash([]);
+                rmsCtx.fillStyle = '#f87171';
+                rmsCtx.textAlign = 'right';
+                rmsCtx.fillText(`${label} ${val.toFixed(3)}`, w - pad.right - 2, y - 3);
+            });
+
+            const stepX = plotW / (MAX_RMS_POINTS - 1);
+            const startIdx = Math.max(0, rmsData.length - MAX_RMS_POINTS);
+
+            rmsCtx.beginPath();
+            rmsCtx.moveTo(pad.left, h - pad.bottom);
+            for (let i = startIdx; i < rmsData.length; i++) {
+                rmsCtx.lineTo(pad.left + (i - startIdx) * stepX, yOf(rmsData[i]));
+            }
+            rmsCtx.lineTo(pad.left + (rmsData.length - 1 - startIdx) * stepX, h - pad.bottom);
+            rmsCtx.closePath();
+            const grad = rmsCtx.createLinearGradient(0, pad.top, 0, h - pad.bottom);
+            grad.addColorStop(0, 'rgba(96, 165, 250, 0.28)');
+            grad.addColorStop(1, 'rgba(96, 165, 250, 0.01)');
+            rmsCtx.fillStyle = grad;
+            rmsCtx.fill();
+
+            rmsCtx.beginPath();
+            for (let i = startIdx; i < rmsData.length; i++) {
+                const x = pad.left + (i - startIdx) * stepX;
+                const y = yOf(rmsData[i]);
+                i === startIdx ? rmsCtx.moveTo(x, y) : rmsCtx.lineTo(x, y);
+            }
+            rmsCtx.strokeStyle = '#60a5fa';
+            rmsCtx.lineWidth = 1.4;
+            rmsCtx.stroke();
+
+            const lastX = pad.left + (rmsData.length - 1 - startIdx) * stepX;
+            const lastY = yOf(rmsData[rmsData.length - 1]);
+            rmsCtx.beginPath();
+            rmsCtx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
+            rmsCtx.fillStyle = rmsData[rmsData.length - 1] > squelchOpen ? '#34d399' : '#60a5fa';
+            rmsCtx.fill();
+            rmsCtx.strokeStyle = '#0a0e17';
+            rmsCtx.lineWidth = 2;
+            rmsCtx.stroke();
+        }
+
         // ============ SIGNAL LOG ============
+        function modTagClass(mod, conf) {
+            if (!mod || mod === 'UNKNOWN' || mod === 'NOISE') return 'tag-weak';
+            return (conf != null && conf < 0.45) ? 'tag-weak' : 'tag-mod';
+        }
+
         function addSignalEntry(data) {
             const log = document.getElementById('signalLog');
-            // Remove empty state
             const empty = log.querySelector('.empty-state');
             if (empty) empty.remove();
 
@@ -834,58 +1219,620 @@
             const entry = document.createElement('div');
             entry.className = 'signal-entry';
 
-            const now = new Date();
-            const timeStr = now.toTimeString().substr(0, 8);
+            const when = data.timestamp ? new Date(data.timestamp) : new Date();
+            const timeStr = when.toTimeString().slice(0, 8);
+            const conf = data.modulation_confidence;
+            const modText = data.modulation
+                ? `${data.modulation}${conf != null ? ' ' + Math.round(conf * 100) + '%' : ''}`
+                : '';
 
             entry.innerHTML = `
                 <div class="signal-entry-header">
-                    <span class="signal-number">#${data.signal_number}</span>
+                    <span class="signal-number">#${data.signal_number || ''}</span>
                     <span class="signal-time">${timeStr}</span>
                 </div>
                 <div class="signal-tags">
                     <span class="tag tag-freq">${data.frequency_khz} kHz</span>
                     <span class="tag tag-dur">${data.duration}s</span>
+                    ${data.snr_db != null ? `<span class="tag tag-snr">SNR ${data.snr_db}dB</span>` : ''}
+                    ${modText ? `<span class="tag ${modTagClass(data.modulation, conf)}">${modText}</span>` : ''}
                     <span class="tag tag-rms">RMS ${data.peak_rms}</span>
+                    ${data.smeter_dbm != null ? `<span class="tag tag-weak">${data.smeter_dbm} dBm</span>` : ''}
+                    <span class="row-actions"></span>
                 </div>
-                ${data.recording ? `<div class="signal-detail" style="margin-top:4px;font-size:10px;">File: ${data.recording}</div>` : ''}
+                ${data.recording ? `<div class="signal-detail" style="margin-top:5px;font-size:10px;">${data.recording}</div>` : ''}
             `;
 
+            if (data.signal_id && data.has_audio) {
+                const btn = document.createElement('button');
+                btn.className = 'play-btn';
+                btn.textContent = '▶';
+                btn.title = '回放这段录音';
+                btn.onclick = () => togglePlay(data.signal_id, btn);
+                entry.querySelector('.row-actions').appendChild(btn);
+
+                const spec = document.createElement('button');
+                spec.className = 'play-btn';
+                spec.textContent = '▤';
+                spec.title = '查看频谱图';
+                spec.onclick = () => toggleSpectrogram(data.signal_id, entry, spec);
+                entry.querySelector('.row-actions').appendChild(spec);
+            }
+
             log.insertBefore(entry, log.firstChild);
+            while (log.children.length > 60) log.removeChild(log.lastChild);
 
-            // Keep max 50 entries
-            while (log.children.length > 50) log.removeChild(log.lastChild);
+            liveCount++;
+            document.getElementById('liveBadge').textContent = liveCount;
 
-            // Update avg rms
-            signalPeaks.push(data.peak_rms);
-            const avg = signalPeaks.reduce((a,b) => a+b, 0) / signalPeaks.length;
-            document.getElementById('statAvgRms').textContent = avg.toFixed(4);
+            if (typeof data.peak_rms === 'number') {
+                signalPeaks.push(data.peak_rms);
+                const avg = signalPeaks.reduce((a, b) => a + b, 0) / signalPeaks.length;
+                document.getElementById('statAvgRms').textContent = avg.toFixed(4);
+            }
+            if (typeof data.snr_db === 'number') {
+                signalSnrs.push(data.snr_db);
+                const avg = signalSnrs.reduce((a, b) => a + b, 0) / signalSnrs.length;
+                document.getElementById('statAvgSnr').textContent = avg.toFixed(1) + ' dB';
+            }
+        }
+
+        function addLogEntry(label, message, color) {
+            const log = document.getElementById('signalLog');
+            const empty = log.querySelector('.empty-state');
+            if (empty) empty.remove();
+
+            const entry = document.createElement('div');
+            entry.className = 'signal-entry';
+            const timeStr = new Date().toTimeString().slice(0, 8);
+            const colorMap = {
+                yellow: 'var(--yellow)', green: 'var(--green)', red: 'var(--red)',
+                cyan: 'var(--cyan)', purple: 'var(--purple)', blue: 'var(--accent)',
+            };
+            entry.innerHTML = `
+                <div class="signal-entry-header">
+                    <span class="signal-number" style="color:${colorMap[color] || 'var(--text-dim)'}">[${label}]</span>
+                    <span class="signal-time">${timeStr}</span>
+                </div>
+                <div class="signal-detail">${message}</div>`;
+            log.insertBefore(entry, log.firstChild);
+            while (log.children.length > 60) log.removeChild(log.lastChild);
+            document.getElementById('statsSection').style.display = 'block';
+        }
+
+        // ============ AUDIO PLAYBACK ============
+        function togglePlay(signalId, btn) {
+            document.querySelectorAll('.play-btn.playing').forEach(b => {
+                b.classList.remove('playing');
+                b.textContent = '▶';
+            });
+
+            if (audioPlayer && playingId === signalId && !audioPlayer.paused) {
+                audioPlayer.pause();
+                playingId = null;
+                return;
+            }
+
+            if (audioPlayer) audioPlayer.pause();
+            audioPlayer = new Audio(`/api/recordings/${signalId}/audio`);
+            playingId = signalId;
+            btn.classList.add('playing');
+            btn.textContent = '❚❚';
+
+            audioPlayer.onended = () => {
+                btn.classList.remove('playing');
+                btn.textContent = '▶';
+                playingId = null;
+            };
+            audioPlayer.onerror = () => {
+                btn.classList.remove('playing');
+                btn.textContent = '▶';
+                showToast('录音文件读取失败', 'error');
+            };
+            audioPlayer.play().catch(() => showToast('浏览器拒绝自动播放', 'error'));
+        }
+
+        // ============ TABS ============
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t =>
+                t.classList.toggle('active', t.dataset.tab === name));
+            document.querySelectorAll('.tab-panel').forEach(p =>
+                p.classList.toggle('active', p.id === 'panel-' + name));
+            if (name === 'rec') loadRecordings();
+            if (name === 'stats') loadStats();
+        }
+
+        // ============ RECORDINGS ============
+        async function loadRecordings() {
+            const list = document.getElementById('recList');
+            const days = document.getElementById('recDays').value;
+            const snr = document.getElementById('recSnr').value;
+            const onlyAudio = document.getElementById('recOnlyAudio').checked ? '1' : '0';
+
+            list.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+            try {
+                const params = new URLSearchParams({ days, limit: 150, with_recording: onlyAudio });
+                if (snr) params.set('min_snr', snr);
+                const rows = await (await fetch('/api/recordings?' + params)).json();
+
+                if (!rows.length) {
+                    list.innerHTML = '<div class="empty-state"><div class="empty-icon">◎</div><p>这个时间范围里没有记录</p></div>';
+                    return;
+                }
+
+                list.innerHTML = '';
+                rows.forEach(r => list.appendChild(recordingRow(r)));
+            } catch (e) {
+                list.innerHTML = `<div class="empty-state"><p>加载失败: ${e.message}</p></div>`;
+            }
+        }
+
+        function recordingRow(r) {
+            const el = document.createElement('div');
+            el.className = 'signal-entry';
+            const when = r.timestamp ? new Date(r.timestamp) : null;
+            const dateStr = when ? when.toLocaleString('zh-CN', { hour12: false }).slice(5) : '';
+            const conf = r.modulation_confidence;
+
+            el.innerHTML = `
+                <div class="signal-entry-header">
+                    <span class="signal-number">${r.frequency_khz} kHz</span>
+                    <span class="signal-time">${dateStr}</span>
+                </div>
+                <div class="signal-tags">
+                    <span class="tag tag-dur">${(r.duration_seconds || 0).toFixed(1)}s</span>
+                    ${r.snr_db != null ? `<span class="tag tag-snr">SNR ${r.snr_db.toFixed(1)}dB</span>` : ''}
+                    ${r.estimated_modulation ? `<span class="tag ${modTagClass(r.estimated_modulation, conf)}">${r.estimated_modulation}${conf != null ? ' ' + Math.round(conf * 100) + '%' : ''}</span>` : ''}
+                    ${r.bandwidth_hz != null ? `<span class="tag tag-weak">BW ${Math.round(r.bandwidth_hz)}Hz</span>` : ''}
+                    ${r.s_meter_dbm != null ? `<span class="tag tag-weak">${r.s_meter_dbm.toFixed(0)} dBm</span>` : ''}
+                    <span class="row-actions"></span>
+                </div>
+                <div class="signal-detail" style="margin-top:5px;font-size:10px;">
+                    ${r.node_name || ''} ${r.filename ? '· ' + r.filename : ''} ${r.file_size_kb ? '· ' + r.file_size_kb + ' KB' : ''}
+                </div>`;
+
+            const tags = el.querySelector('.row-actions');
+            if (r.has_audio) {
+                const play = document.createElement('button');
+                play.className = 'play-btn';
+                play.textContent = '▶';
+                play.title = '回放';
+                play.onclick = () => togglePlay(r.id, play);
+                tags.appendChild(play);
+
+                const spec = document.createElement('button');
+                spec.className = 'play-btn';
+                spec.textContent = '▤';
+                spec.title = '查看频谱图';
+                spec.onclick = () => toggleSpectrogram(r.id, el, spec);
+                tags.appendChild(spec);
+            }
+            return el;
+        }
+
+        async function toggleSpectrogram(signalId, container, btn) {
+            const existing = container.querySelector('.spec-thumb');
+            if (existing) { existing.remove(); btn.classList.remove('playing'); return; }
+
+            btn.classList.add('playing');
+            const canvas = document.createElement('canvas');
+            canvas.className = 'spec-thumb';
+            container.appendChild(canvas);
+
+            try {
+                const data = await (await fetch(
+                    `/api/recordings/${signalId}/spectrogram?bins=96&cols=200`)).json();
+                if (data.error) throw new Error(data.error);
+                drawSpectrogram(canvas, data);
+            } catch (e) {
+                canvas.remove();
+                btn.classList.remove('playing');
+                showToast('频谱图生成失败: ' + e.message, 'error');
+            }
+        }
+
+        function drawSpectrogram(canvas, data) {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = Math.max(Math.floor(rect.width), 200);
+            canvas.height = 74;
+            const ctx = canvas.getContext('2d');
+
+            const off = document.createElement('canvas');
+            off.width = data.n_time;
+            off.height = data.n_freq;
+            const offCtx = off.getContext('2d');
+            const img = offCtx.createImageData(data.n_time, data.n_freq);
+
+            for (let t = 0; t < data.n_time; t++) {
+                for (let f = 0; f < data.n_freq; f++) {
+                    const v = data.matrix[t * data.n_freq + f] | 0;
+                    // 频率轴翻转: 低频在下
+                    const o = ((data.n_freq - 1 - f) * data.n_time + t) * 4;
+                    img.data[o] = COLORMAP[v * 3];
+                    img.data[o + 1] = COLORMAP[v * 3 + 1];
+                    img.data[o + 2] = COLORMAP[v * 3 + 2];
+                    img.data[o + 3] = 255;
+                }
+            }
+            offCtx.putImageData(img, 0, 0);
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = 'rgba(226,232,240,0.75)';
+            ctx.font = '9px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+            ctx.textAlign = 'left';
+            ctx.fillText(`${Math.round(data.freq_min)}-${Math.round(data.freq_max)} Hz`, 4, 11);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${data.duration_seconds.toFixed(1)}s`, canvas.width - 4, 11);
+        }
+
+        // ============ STATS ============
+        async function loadStats() {
+            const body = document.getElementById('statsBody');
+            const days = document.getElementById('statsDays').value;
+            body.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+
+            try {
+                const s = await (await fetch(`/api/stats?days=${days}`)).json();
+                body.innerHTML = '';
+
+                const totalSignals = (s.frequency_stats || [])
+                    .reduce((a, f) => a + (f.signal_count || 0), 0);
+                body.appendChild(statsBlock('概览', `
+                    <div class="stat-row"><span class="stat-label">信号总数</span><span class="stat-val">${totalSignals}</span></div>
+                    <div class="stat-row"><span class="stat-label">活跃频率</span><span class="stat-val">${(s.frequency_stats || []).length}</span></div>
+                    <div class="stat-row"><span class="stat-label">统计范围</span><span class="stat-val">${s.days} 天</span></div>`));
+
+                // 频率活跃度
+                const freqs = (s.frequency_stats || []).slice(0, 10);
+                if (freqs.length) {
+                    const max = Math.max(...freqs.map(f => f.signal_count));
+                    body.appendChild(statsBlock('频率活跃度', freqs.map(f => barRow(
+                        `${f.frequency_khz} kHz`,
+                        `${f.signal_count} 条 · ${f.avg_s_meter != null ? f.avg_s_meter.toFixed(0) + ' dBm' : '--'}`,
+                        f.signal_count / max)).join('')));
+                }
+
+                // 调制分布
+                const mods = s.modulation_stats || [];
+                if (mods.length) {
+                    const max = Math.max(...mods.map(m => m.count));
+                    body.appendChild(statsBlock('调制类型分布', mods.map(m => barRow(
+                        m.estimated_modulation || 'UNKNOWN',
+                        `${m.count} 条 · 置信度 ${m.avg_confidence != null ? Math.round(m.avg_confidence * 100) + '%' : '--'}`,
+                        m.count / max, 'yellow')).join('')));
+                }
+
+                // 带内 SNR 分布
+                const snr = s.snr_distribution || [];
+                if (snr.length) {
+                    const max = Math.max(...snr.map(b => b.count));
+                    body.appendChild(statsBlock('带内 SNR 分布', snr.map(b => barRow(
+                        `${b.bucket_db} ~ ${b.bucket_db + 5} dB`,
+                        `${b.count} 条`,
+                        b.count / max, 'green')).join('')));
+                }
+
+                // 24h 活动
+                const hourly = s.hourly_activity || [];
+                if (hourly.length) {
+                    const map = {};
+                    hourly.forEach(h => map[parseInt(h.hour, 10)] = h.signal_count);
+                    const max = Math.max(...Object.values(map), 1);
+                    let cells = '', labels = '';
+                    for (let h = 0; h < 24; h++) {
+                        const v = map[h] || 0;
+                        const alpha = v ? 0.15 + 0.85 * (v / max) : 0;
+                        cells += `<div class="hour-cell" title="${h}:00 UTC · ${v} 条"
+                                   style="background:${v ? `rgba(52,211,153,${alpha})` : 'var(--bg)'}"></div>`;
+                        labels += `<span>${h % 6 === 0 ? h : ''}</span>`;
+                    }
+                    body.appendChild(statsBlock('24 小时活动 (UTC)',
+                        `<div class="hour-strip">${cells}</div><div class="hour-labels">${labels}</div>`));
+                }
+
+                if (!body.children.length) {
+                    body.innerHTML = '<div class="empty-state"><div class="empty-icon">◎</div><p>还没有可统计的数据</p></div>';
+                }
+            } catch (e) {
+                body.innerHTML = `<div class="empty-state"><p>加载失败: ${e.message}</p></div>`;
+            }
+        }
+
+        function statsBlock(title, inner) {
+            const el = document.createElement('div');
+            el.className = 'stats-block';
+            el.innerHTML = `<h4>${title}</h4>${inner}`;
+            return el;
+        }
+
+        function barRow(name, num, ratio, cls = '') {
+            return `<div class="bar-row">
+                <div class="bar-head"><span class="bar-name">${name}</span><span class="bar-num">${num}</span></div>
+                <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.max(ratio * 100, 2)}%"></div></div>
+            </div>`;
+        }
+
+        // ============ SQUELCH ============
+        function syncSquelchInputs() {
+            const open = document.getElementById('sqOpen');
+            const close = document.getElementById('sqClose');
+            open.value = squelchOpen;
+            close.value = squelchClose;
+            document.getElementById('sqOpenVal').textContent = Number(squelchOpen).toFixed(3);
+            document.getElementById('sqCloseVal').textContent = Number(squelchClose).toFixed(3);
+        }
+
+        function onSquelchSlide() {
+            const open = parseFloat(document.getElementById('sqOpen').value);
+            let close = parseFloat(document.getElementById('sqClose').value);
+            if (close >= open) {
+                close = Math.max(0.004, open * 0.85);
+                document.getElementById('sqClose').value = close;
+            }
+            document.getElementById('sqOpenVal').textContent = open.toFixed(3);
+            document.getElementById('sqCloseVal').textContent = close.toFixed(3);
+            document.getElementById('sqState').textContent = '未应用';
+        }
+
+        async function loadSquelch() {
+            try {
+                const s = await (await fetch('/api/squelch')).json();
+                squelchOpen = s.open_threshold;
+                squelchClose = s.close_threshold;
+                syncSquelchInputs();
+                updateFloorReadout(s);
+                document.getElementById('sqState').textContent = '';
+            } catch (e) { /* 页面仍可用 */ }
+        }
+
+        async function refreshSquelchFloor() {
+            if (!monitoring) return;
+            try {
+                updateFloorReadout(await (await fetch('/api/squelch')).json());
+            } catch (e) { /* 忽略 */ }
+        }
+
+        function updateFloorReadout(s) {
+            if (s.rms_noise_floor > 0) {
+                rmsNoiseFloor = s.rms_noise_floor;
+                document.getElementById('sqFloor').textContent = s.rms_noise_floor.toFixed(4);
+                document.getElementById('sqSuggest').textContent =
+                    `${s.suggested_open.toFixed(3)} / ${s.suggested_close.toFixed(3)}`;
+            } else {
+                document.getElementById('sqFloor').textContent = '采样中...';
+            }
+        }
+
+        function applyNoiseFloor() {
+            if (!rmsNoiseFloor) { showToast('还没测到底噪，先跑一会监听', 'error'); return; }
+            document.getElementById('sqOpen').value = (rmsNoiseFloor * 2).toFixed(3);
+            document.getElementById('sqClose').value = (rmsNoiseFloor * 1.7).toFixed(3);
+            onSquelchSlide();
+            applySquelch();
+        }
+
+        async function applySquelch() {
+            const open = parseFloat(document.getElementById('sqOpen').value);
+            const close = parseFloat(document.getElementById('sqClose').value);
+            try {
+                const resp = await fetch('/api/squelch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ open_threshold: open, close_threshold: close }),
+                });
+                const data = await resp.json();
+                if (data.error) { showToast(data.error, 'error'); return; }
+                squelchOpen = open;
+                squelchClose = close;
+                document.getElementById('sqState').textContent = '已应用';
+                showToast('静噪阈值已生效', 'ok');
+                drawRmsChart();
+            } catch (e) {
+                showToast('设置失败: ' + e.message, 'error');
+            }
+        }
+
+        // ============ CONTROLS ============
+        function updateMonitorUI(active) {
+            document.getElementById('btnStart').style.display = active ? 'none' : 'flex';
+            document.getElementById('btnStop').style.display = active ? 'flex' : 'none';
+            document.getElementById('freqInput').disabled = active;
+            document.getElementById('modeSelect').disabled = active;
+            document.getElementById('nodeSelect').disabled = active;
+        }
+
+        async function startMonitor() {
+            const freq = parseFloat(document.getElementById('freqInput').value);
+            const mode = document.getElementById('modeSelect').value;
+            const nodeHost = document.getElementById('nodeSelect').value;
+            const btn = document.getElementById('btnStart');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Connecting...';
+
+            try {
+                const resp = await fetch('/api/monitor/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frequency: freq, mode: mode, node_host: nodeHost }),
+                });
+                const data = await resp.json();
+                if (data.error) showToast(data.error, 'error');
+            } catch (e) {
+                showToast('连接失败: ' + e.message, 'error');
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = 'Start Monitoring';
+        }
+
+        async function stopMonitor() {
+            await fetch('/api/monitor/stop', { method: 'POST' });
+        }
+
+        async function refreshStatus() {
+            try {
+                const s = await (await fetch('/api/status')).json();
+                if (s.passband) passband = s.passband;
+                if (s.squelch) {
+                    squelchOpen = s.squelch.open_threshold;
+                    squelchClose = s.squelch.close_threshold;
+                    syncSquelchInputs();
+                }
+                if (s.rms_history && s.rms_history.length) rmsData = s.rms_history.slice(-MAX_RMS_POINTS);
+                if (s.monitoring) {
+                    monitoring = true;
+                    updateMonitorUI(true);
+                    setTuneInfo(s.frequency_khz, s.mode, s.node);
+                }
+                if (s.spectrum && s.spectrum.bins) updateSpectrum(s.spectrum);
+                drawRmsChart();
+            } catch (e) { /* 页面仍可用 */ }
+        }
+
+        // ============ FREQUENCIES ============
+        async function loadFrequencies() {
+            try {
+                allFrequencies = await (await fetch('/api/frequencies')).json();
+            } catch (e) {
+                allFrequencies = [];
+            }
+            try {
+                const stats = await (await fetch('/api/stats?days=30')).json();
+                (stats.frequency_stats || []).forEach(f =>
+                    freqHistory[f.frequency_khz] = f.signal_count);
+            } catch (e) { /* 没有历史也能用 */ }
+            renderFrequencies();
+        }
+
+        function renderFrequencies() {
+            const showAll = document.getElementById('showAllFreqs').checked;
+            const wrap = document.getElementById('freqGroups');
+            wrap.innerHTML = '';
+
+            const groups = {};
+            allFrequencies
+                .filter(f => showAll || f.priority === 'high')
+                .forEach(f => (groups[f.network] = groups[f.network] || []).push(f));
+
+            if (!Object.keys(groups).length) {
+                wrap.innerHTML = '<div class="empty-state" style="padding:14px"><p>没有频率数据</p></div>';
+                return;
+            }
+
+            Object.entries(groups).forEach(([network, list]) => {
+                const label = document.createElement('div');
+                label.className = 'freq-group-label';
+                label.textContent = network;
+                wrap.appendChild(label);
+
+                const grid = document.createElement('div');
+                grid.className = 'freq-grid';
+                list.forEach(f => {
+                    const chip = document.createElement('div');
+                    const seen = freqHistory[f.freq];
+                    chip.className = 'freq-chip' + (seen ? ' has-history' : '');
+                    chip.title = `${f.description || ''}${seen ? ` · 最近 30 天 ${seen} 条` : ''}`;
+                    chip.innerHTML = `<div class="freq-val">${f.freq}</div>
+                                      <div class="freq-label">${f.mode}${seen ? ' · ' + seen : ''}</div>`;
+                    chip.onclick = () => {
+                        document.getElementById('freqInput').value = f.freq;
+                        document.getElementById('modeSelect').value = f.mode;
+                        document.querySelectorAll('.freq-chip').forEach(c => c.classList.remove('active'));
+                        chip.classList.add('active');
+                    };
+                    grid.appendChild(chip);
+                });
+                wrap.appendChild(grid);
+            });
+        }
+
+        // ============ NODES ============
+        async function loadNodes() {
+            try {
+                const nodes = await (await fetch('/api/nodes')).json();
+                fillNodeSelect(nodes);
+                renderNodeList(nodes);
+            } catch (e) { /* 页面仍可用 */ }
+        }
+
+        function fillNodeSelect(nodes) {
+            const select = document.getElementById('nodeSelect');
+            const current = select.value;
+            select.innerHTML = '<option value="">Auto (best available)</option>';
+            nodes.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n.host;
+                opt.textContent = `${n.name || n.host}${n.is_available ? ' [OK]' : ''}`;
+                select.appendChild(opt);
+            });
+            select.value = current;
+        }
+
+        function renderNodeList(nodes) {
+            const list = document.getElementById('nodeList');
+            if (!nodes.length) {
+                list.innerHTML = '<div class="empty-state"><p>没有配置节点</p></div>';
+                return;
+            }
+            list.innerHTML = '';
+            nodes.forEach(n => {
+                const item = document.createElement('div');
+                item.className = 'node-item';
+                const dotClass = n.is_available ? 'available' : (n.last_check ? 'unavailable' : 'unknown');
+                item.innerHTML = `
+                    <div class="node-dot ${dotClass}"></div>
+                    <div class="node-info">
+                        <div class="node-name">${n.name || n.host}</div>
+                        <div class="node-detail">${n.location || ''} ${n.latency_ms ? `| ${Math.round(n.latency_ms)}ms` : ''}</div>
+                    </div>`;
+                item.onclick = () => {
+                    document.getElementById('nodeSelect').value = n.host;
+                    document.querySelectorAll('.node-item').forEach(i => i.classList.remove('selected'));
+                    item.classList.add('selected');
+                };
+                list.appendChild(item);
+            });
+        }
+
+        async function checkNodes() {
+            const btn = document.getElementById('btnCheckNodes');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Checking...';
+
+            try {
+                await fetch('/api/nodes/check', { method: 'POST' });
+                const nodes = await (await fetch('/api/nodes')).json();
+                renderNodeList(nodes);
+                fillNodeSelect(nodes);
+                const ok = nodes.filter(n => n.is_available).length;
+                showToast(`${ok}/${nodes.length} 个节点可用`, ok ? 'ok' : 'error');
+            } catch (e) {
+                showToast('检查失败: ' + e.message, 'error');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Check Node Availability';
         }
 
         // ============ RECONNECTION UI ============
         let reconnectTimer = null;
 
-        function showReconnectBanner(message, attempt, waitSeconds) {
+        function showReconnectBanner(message, attempt) {
             const banner = document.getElementById('reconnectBanner');
-            const text = document.getElementById('reconnectText');
-            const attemptEl = document.getElementById('reconnectAttempt');
             banner.classList.add('visible');
-            text.textContent = message;
-            attemptEl.textContent = `第 ${attempt} 次重连`;
+            document.getElementById('reconnectText').textContent = message;
+            document.getElementById('reconnectAttempt').textContent = `第 ${attempt} 次重连`;
 
-            // Update header status to reconnecting
             const el = document.getElementById('wsStatus');
             el.className = 'status-pill reconnecting';
-            el.innerHTML = `<span class="status-dot reconnecting"></span>
-                            <span>Reconnecting...</span>`;
+            el.innerHTML = `<span class="status-dot reconnecting"></span><span>Reconnecting...</span>`;
         }
 
         function hideReconnectBanner() {
             document.getElementById('reconnectBanner').classList.remove('visible');
-            if (reconnectTimer) {
-                clearInterval(reconnectTimer);
-                reconnectTimer = null;
-            }
-            // Restore header status
+            if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
             setWSStatus(true);
         }
 
@@ -905,171 +1852,14 @@
             }, 1000);
         }
 
-        function addLogEntry(label, message, color) {
-            const log = document.getElementById('signalLog');
-            const empty = log.querySelector('.empty-state');
-            if (empty) empty.remove();
-
-            const entry = document.createElement('div');
-            entry.className = 'signal-entry';
-            const now = new Date();
-            const timeStr = now.toTimeString().substr(0, 8);
-            const colorMap = {
-                'yellow': 'var(--yellow)', 'green': 'var(--green)',
-                'red': 'var(--red)', 'cyan': 'var(--cyan)',
-                'purple': 'var(--purple)', 'blue': 'var(--accent)',
-            };
-            const c = colorMap[color] || 'var(--text-dim)';
-            entry.innerHTML = `
-                <div class="signal-entry-header">
-                    <span class="signal-number" style="color:${c}">[${label}]</span>
-                    <span class="signal-time">${timeStr}</span>
-                </div>
-                <div class="signal-detail">${message}</div>
-            `;
-            log.insertBefore(entry, log.firstChild);
-            while (log.children.length > 50) log.removeChild(log.lastChild);
-
-            document.getElementById('statsSection').style.display = 'block';
-        }
-
-        // ============ CONTROLS ============
-        function updateMonitorUI(active) {
-            document.getElementById('btnStart').style.display = active ? 'none' : 'flex';
-            document.getElementById('btnStop').style.display = active ? 'flex' : 'none';
-            document.getElementById('freqInput').disabled = active;
-            document.getElementById('modeSelect').disabled = active;
-            document.getElementById('nodeSelect').disabled = active;
-        }
-
-        async function startMonitor() {
-            const freq = parseFloat(document.getElementById('freqInput').value);
-            const mode = document.getElementById('modeSelect').value;
-            const nodeHost = document.getElementById('nodeSelect').value;
-
-            document.getElementById('btnStart').disabled = true;
-            document.getElementById('btnStart').innerHTML = '<span class="spinner"></span> Connecting...';
-
-            try {
-                const resp = await fetch('/api/monitor/start', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ frequency: freq, mode: mode, node_host: nodeHost })
-                });
-                const data = await resp.json();
-                if (data.error) {
-                    alert('Error: ' + data.error);
-                }
-            } catch(e) {
-                alert('Connection error: ' + e.message);
-            }
-
-            document.getElementById('btnStart').disabled = false;
-            document.getElementById('btnStart').innerHTML = 'Start Monitoring';
-        }
-
-        async function stopMonitor() {
-            await fetch('/api/monitor/stop', { method: 'POST' });
-        }
-
-        // ============ FREQUENCIES ============
-        async function loadFrequencies() {
-            try {
-                const resp = await fetch('/api/frequencies');
-                const freqs = await resp.json();
-
-                const grid = document.getElementById('freqGrid');
-                grid.innerHTML = '';
-
-                // Show HFGCS high-priority frequencies
-                const hfgcs = freqs.filter(f => f.network === 'hfgcs' && f.priority === 'high');
-                const others = freqs.filter(f => f.priority === 'high' && f.network !== 'hfgcs').slice(0, 2);
-
-                [...hfgcs, ...others].forEach(f => {
-                    const chip = document.createElement('div');
-                    chip.className = 'freq-chip';
-                    chip.innerHTML = `<div class="freq-val">${f.freq}</div>
-                                     <div class="freq-label">${f.mode}</div>`;
-                    chip.onclick = () => {
-                        document.getElementById('freqInput').value = f.freq;
-                        document.getElementById('modeSelect').value = f.mode;
-                        document.querySelectorAll('.freq-chip').forEach(c => c.classList.remove('active'));
-                        chip.classList.add('active');
-                    };
-                    grid.appendChild(chip);
-                });
-            } catch(e) {
-                console.log('Cannot load frequencies:', e);
-            }
-        }
-
-        // ============ NODES ============
-        async function loadNodes() {
-            try {
-                const resp = await fetch('/api/nodes');
-                const nodes = await resp.json();
-                const select = document.getElementById('nodeSelect');
-                select.innerHTML = '<option value="">Auto (best available)</option>';
-                nodes.forEach(n => {
-                    const opt = document.createElement('option');
-                    opt.value = n.host;
-                    opt.textContent = `${n.name || n.host} (${n.location || '?'})`;
-                    select.appendChild(opt);
-                });
-            } catch(e) { console.log('Cannot load nodes:', e); }
-        }
-
-        async function checkNodes() {
-            const btn = document.getElementById('btnCheckNodes');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span> Checking...';
-
-            try {
-                const resp = await fetch('/api/nodes/check', { method: 'POST' });
-                const data = await resp.json();
-
-                // Reload node list
-                const resp2 = await fetch('/api/nodes');
-                const nodes = await resp2.json();
-
-                const list = document.getElementById('nodeList');
-                list.innerHTML = '';
-
-                nodes.forEach(n => {
-                    const item = document.createElement('div');
-                    item.className = 'node-item';
-                    const dotClass = n.is_available ? 'available' : (n.last_check ? 'unavailable' : 'unknown');
-                    item.innerHTML = `
-                        <div class="node-dot ${dotClass}"></div>
-                        <div class="node-info">
-                            <div class="node-name">${n.name || n.host}</div>
-                            <div class="node-detail">${n.location || ''} ${n.latency_ms ? `| ${Math.round(n.latency_ms)}ms` : ''}</div>
-                        </div>
-                    `;
-                    item.onclick = () => {
-                        document.getElementById('nodeSelect').value = n.host;
-                        document.querySelectorAll('.node-item').forEach(i => i.classList.remove('selected'));
-                        item.classList.add('selected');
-                    };
-                    list.appendChild(item);
-                });
-
-                // Update select
-                const select = document.getElementById('nodeSelect');
-                select.innerHTML = '<option value="">Auto (best available)</option>';
-                nodes.forEach(n => {
-                    const opt = document.createElement('option');
-                    opt.value = n.host;
-                    opt.textContent = `${n.name || n.host}${n.is_available ? ' [OK]' : ''}`;
-                    select.appendChild(opt);
-                });
-
-            } catch(e) {
-                alert('Check failed: ' + e.message);
-            }
-
-            btn.disabled = false;
-            btn.textContent = 'Check Node Availability';
+        // ============ TOAST ============
+        let toastTimer = null;
+        function showToast(message, kind = '') {
+            const el = document.getElementById('toast');
+            el.textContent = message;
+            el.className = `toast show ${kind}`;
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => { el.className = 'toast ' + kind; }, 2600);
         }
     </script>
 </body>

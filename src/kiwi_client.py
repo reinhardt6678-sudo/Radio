@@ -12,6 +12,8 @@ import time
 import numpy as np
 from typing import Optional, Callable, Awaitable
 
+from .modes import demod_filter, normalize_mode
+
 try:
     import websockets
     from websockets.asyncio.client import connect as ws_connect
@@ -32,9 +34,18 @@ class KiwiSDRClient:
     - S-meter 信号强度读取
     """
 
-    # KiwiSDR 音频数据帧标识
-    MSG_AUDIO = ord('S')     # 音频样本数据
-    MSG_W_F_FLAGS = ord('W') # waterfall 数据 (本项目不使用)
+    # KiwiSDR 帧标识 - 每帧前 3 字节是 tag，不是 1 字节
+    # (只比首字节会把 'STA' 之类的帧误判成音频)
+    TAG_AUDIO = b'SND'       # 音频样本数据
+    TAG_MSG = b'MSG'         # 服务器消息
+    TAG_WATERFALL = b'W/F'   # waterfall 数据 (本项目不使用)
+
+    # SND 帧头部长度: tag(3) + flags(1) + seq(4) + smeter(2)
+    SND_HEADER_LEN = 10
+
+    # S-meter 原始值是 12 位
+    SMETER_MASK = 0x0FFF
+    SMETER_BIAS_DB = 127.0   # dBm = 0.1 * raw - 127
 
     # 默认连接参数
     DEFAULT_PORT = 8073
@@ -55,8 +66,10 @@ class KiwiSDRClient:
         self.password = password or ""
         self.ws: Optional[websockets.ClientProtocol] = None
         self.connected = False
-        self._seq = 0
-        self._last_smeter = -120.0  # dBm
+        self._last_seq: Optional[int] = None
+        self._dropped_frames = 0
+        self._audio_frames = 0
+        self._last_smeter = -127.0  # dBm
         self._current_freq = 0.0
         self._current_mode = "USB"
         self._audio_callback: Optional[Callable] = None
@@ -67,6 +80,21 @@ class KiwiSDRClient:
     def smeter(self) -> float:
         """最近的 S-meter 读数 (dBm)。"""
         return self._last_smeter
+
+    @property
+    def last_seq(self) -> Optional[int]:
+        """最近一帧的序列号 (服务器侧帧计数器)。"""
+        return self._last_seq
+
+    @property
+    def dropped_frames(self) -> int:
+        """按 seq 跳变统计出的丢帧数。"""
+        return self._dropped_frames
+
+    @property
+    def audio_frames(self) -> int:
+        """已收到的音频帧数。"""
+        return self._audio_frames
 
     # KiwiSDR 服务器拒绝消息 - 必须精确匹配 MSG 前缀
     # (不能用模糊匹配，因为 load_cfg 包含完整配置 JSON 会误报)
@@ -191,26 +219,14 @@ class KiwiSDRClient:
             raise RuntimeError("未连接到 KiwiSDR")
 
         self._current_freq = freq_khz
-        self._current_mode = mode.upper()
+        self._current_mode = normalize_mode(mode)
 
-        # 根据模式设置合适的带通滤波器
-        if self._current_mode == "USB":
-            low_cut = 300
-            high_cut = 3000
-        elif self._current_mode == "LSB":
-            low_cut = -3000
-            high_cut = -300
-        elif self._current_mode == "AM":
-            low_cut = -4500
-            high_cut = 4500
-        elif self._current_mode in ("CW", "CWN"):
-            low_cut = 400
-            high_cut = 900
-        else:
-            low_cut = 300
-            high_cut = 3000
+        # 带通滤波器和分析端共用 modes.py 里的同一张表，
+        # 保证 analyzer 算 SNR 时用的通带就是这里真正设下去的通带
+        low_cut, high_cut = demod_filter(self._current_mode)
 
-        cmd = f"SET mod={self._current_mode.lower()} low_cut={low_cut} high_cut={high_cut} freq={freq_khz:.3f}"
+        cmd = (f"SET mod={self._current_mode.lower()} "
+               f"low_cut={low_cut:.0f} high_cut={high_cut:.0f} freq={freq_khz:.3f}")
         await self._send_cmd(cmd)
         logger.info(f"调谐到: {freq_khz} kHz ({self._current_mode})")
 
@@ -320,10 +336,8 @@ class KiwiSDRClient:
                     continue
 
                 if isinstance(msg, bytes) and len(msg) > 0:
-                    tag = msg[0]
-
-                    if tag == self.MSG_AUDIO:
-                        # 'S' (83) = 音频数据帧
+                    if self._is_audio_frame(msg):
+                        # 'SND' = 音频数据帧
                         _frame_count += 1
                         if _frame_count == 1:
                             logger.info("收到首个音频帧，数据流正常")
@@ -368,34 +382,53 @@ class KiwiSDRClient:
             logger.error(f"接收循环异常: {e} (共收到 {_frame_count} 帧)")
             self.connected = False
 
+    def _is_audio_frame(self, data: bytes) -> bool:
+        """判断是否是音频帧 (必须比较完整的 3 字节 tag)。"""
+        return len(data) >= 3 and data[0:3] == self.TAG_AUDIO
+
     async def _process_audio_data(self, data: bytes):
         """
         解析 KiwiSDR 音频数据帧。
 
-        官方 kiwiclient 格式 (参考 github.com/jks-prv/kiwiclient):
+        官方 kiwiclient 的布局 (kiwi/client.py::_process_aud):
+            flags, seq = struct.unpack('<BI', body[0:5])
+            smeter,    = struct.unpack('>H',  body[5:7])
+            data       = body[7:]
+
+        即:
         - tag  = data[0:3]  -> 'SND' (3 字节)
-        - body = data[3:]   -> 帧数据:
-          - body[0]:   flags (SND_FLAG_*)
-          - body[1:3]: 序列号 (big-endian uint16)
-          - body[3:5]: S-meter / RSSI (big-endian uint16)
-          - body[5:]:  PCM 音频样本 (big-endian int16, 未压缩时)
+        - body = data[3:]:
+          - body[0]:   flags
+          - body[1:5]: 序列号 (little-endian uint32, 4 字节)
+          - body[5:7]: S-meter (big-endian uint16, 低 12 位有效)
+          - body[7:]:  PCM 音频样本 (big-endian int16, 未压缩)
+
+        注意 seq 是 4 字节小端而非 2 字节大端。按 2 字节读会让整个帧偏移
+        2 字节：S-meter 位置读到的是帧计数器的高位字节，音频起点提前 2 字节
+        导致每帧多出 1 个假样本 —— 那 2 个 S-meter 字节被当成了一个 int16，
+        在录音里表现为 12000/512 = 23.4375 Hz 的帧率谐波嗡声。
         """
-        # tag(3) + flags(1) + seq(2) + smeter(2) + 至少2字节音频
-        if len(data) < 10:
+        if len(data) < self.SND_HEADER_LEN + 2:
             return
 
-        # body = data[3:]
         body = data[3:]
-        flags = body[0]
-        seq = struct.unpack('>H', body[1:3])[0]
-        smeter_raw = struct.unpack('>H', body[3:5])[0]
+        flags, seq = struct.unpack('<BI', body[0:5])
+        smeter_raw = struct.unpack('>H', body[5:7])[0]
 
-        # S-meter 原始值转换为 dBm (近似)
-        # KiwiSDR S-meter 值范围约 0-65535，映射到 -160 到 -10 dBm
-        self._last_smeter = (smeter_raw / 65535.0) * 150.0 - 160.0
+        # S-meter 原始值转换为 dBm
+        # KiwiSDR 服务器发的是 (dBm + 127) * 10，取低 12 位
+        self._last_smeter = 0.1 * (smeter_raw & self.SMETER_MASK) - self.SMETER_BIAS_DB
 
-        # 提取音频样本: body[5:] = data[8:]
-        audio_bytes = body[5:]
+        # 按 seq 统计丢帧 (seq 是 uint32，会回绕)
+        if self._last_seq is not None:
+            gap = (seq - self._last_seq) & 0xFFFFFFFF
+            if 1 < gap < 1000:
+                self._dropped_frames += gap - 1
+        self._last_seq = seq
+        self._audio_frames += 1
+
+        # 提取音频样本: body[7:] = data[10:]
+        audio_bytes = body[7:]
 
         # 确保数据长度是偶数（int16 样本）
         if len(audio_bytes) % 2 != 0:

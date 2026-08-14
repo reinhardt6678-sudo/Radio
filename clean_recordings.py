@@ -70,7 +70,8 @@ class RecordingClassifier:
                  impulse_max_duration: float = 3.0,
                  impulse_min_crest: float = 15.0,
                  silent_rms_threshold: float = 0.005,
-                 analyzer: SignalAnalyzer = None):
+                 analyzer: SignalAnalyzer = None,
+                 mode: str = "USB"):
         """
         初始化分类器。
 
@@ -82,6 +83,9 @@ class RecordingClassifier:
             impulse_min_crest: 脉冲判定的最低峰均比(dB)
             silent_rms_threshold: 静音判定的 RMS 上限
             analyzer: 信号分析器实例
+            mode: 录音时使用的解调模式，决定 SNR 与调制判定的通带。
+                  这里判错会直接导致删错文件 —— 用 AM 录的音按 USB 的
+                  300-3000 Hz 通带去量，带外的能量根本不参与计算。
         """
         self.min_duration = min_duration
         self.min_snr = min_snr
@@ -90,6 +94,7 @@ class RecordingClassifier:
         self.impulse_min_crest = impulse_min_crest
         self.silent_rms_threshold = silent_rms_threshold
         self.analyzer = analyzer or SignalAnalyzer()
+        self.mode = mode
 
     def classify(self, wav_path: str) -> Dict:
         """
@@ -137,7 +142,7 @@ class RecordingClassifier:
             return result
 
         # 运行完整分析
-        analysis = self.analyzer.analyze_file(wav_path)
+        analysis = self.analyzer.analyze_file(wav_path, mode=self.mode)
         if analysis is None:
             result["is_junk"] = True
             result["reasons"].append("ANALYZE_FAIL")
@@ -395,6 +400,9 @@ def main():
                         help="脉冲判定最大时长 (秒, 默认: 3.0)")
     parser.add_argument("--impulse-min-crest", type=float, default=15.0,
                         help="脉冲判定最低峰均比 (dB, 默认: 15.0)")
+    parser.add_argument("-m", "--mode", type=str, default="USB",
+                        choices=["USB", "LSB", "AM", "CW", "CWN"],
+                        help="录音时的解调模式, 决定分析通带 (默认: USB)")
     parser.add_argument("-c", "--config", default="config.yaml",
                         help="配置文件路径")
     parser.add_argument("-v", "--verbose", action="store_true",
@@ -448,6 +456,7 @@ def main():
         impulse_max_duration=args.impulse_max_dur,
         impulse_min_crest=args.impulse_min_crest,
         analyzer=analyzer,
+        mode=args.mode,
     )
 
     # 显示当前参数

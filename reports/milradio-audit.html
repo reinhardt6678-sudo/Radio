@@ -1,0 +1,1217 @@
+<title>MilRadio 信号链审计</title>
+<style>
+/* ============================================================
+   MilRadio 审计报告
+   色板：冷调仪表纸 + 仪器青 (#00789C) / 告警氧化红 (#B03A2E)
+   字体：中文正文用人文无衬线；一切"机器测出来的数"用等宽
+   版式：单栏 72ch 阅读列，证据面板向外破格；直角、发丝线
+   ============================================================ */
+
+:root {
+  --ground:      #EFF2F3;
+  --surface:     #FBFCFC;
+  --surface-2:   #E7ECEE;
+  --ink:         #12181B;
+  --ink-2:       #556169;
+  --ink-3:       #7C888F;
+  --rule:        #D5DCDF;
+  --rule-strong: #B6C1C6;
+  --signal:      #00789C;
+  --signal-soft: #DCEDF3;
+  --alarm:       #B03A2E;
+  --alarm-soft:  #F6E3E0;
+  --warn:        #8A6410;
+  --warn-soft:   #F6EDDA;
+  --ok:          #2C6E52;
+  --ok-soft:     #DFEDE6;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+               "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC",
+               system-ui, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo,
+               Consolas, "Liberation Mono", monospace;
+
+  --col: 43rem;
+  --col-wide: 56rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #0E1316;
+    --surface:     #171F23;
+    --surface-2:   #1E282D;
+    --ink:         #E6EBED;
+    --ink-2:       #9AA6AC;
+    --ink-3:       #78848A;
+    --rule:        #28333A;
+    --rule-strong: #3A484F;
+    --signal:      #2A9EC0;
+    --signal-soft: #12303B;
+    --alarm:       #DA6A55;
+    --alarm-soft:  #3A211C;
+    --warn:        #C79A3A;
+    --warn-soft:   #33290F;
+    --ok:          #57A97F;
+    --ok-soft:     #16301F;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:      #0E1316;
+  --surface:     #171F23;
+  --surface-2:   #1E282D;
+  --ink:         #E6EBED;
+  --ink-2:       #9AA6AC;
+  --ink-3:       #78848A;
+  --rule:        #28333A;
+  --rule-strong: #3A484F;
+  --signal:      #2A9EC0;
+  --signal-soft: #12303B;
+  --alarm:       #DA6A55;
+  --alarm-soft:  #3A211C;
+  --warn:        #C79A3A;
+  --warn-soft:   #33290F;
+  --ok:          #57A97F;
+  --ok-soft:     #16301F;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.75;
+  margin: 0;
+  padding: 0 1.5rem 6rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: var(--col-wide); margin: 0 auto; }
+.col  { max-width: var(--col); }
+
+/* ---------- 报头 ---------- */
+
+.masthead {
+  padding: 4.5rem 0 2rem;
+  border-bottom: 2px solid var(--ink);
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--signal);
+  margin: 0 0 1.25rem;
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+.eyebrow span::before { content: "· "; color: var(--ink-3); }
+.eyebrow span:first-child::before { content: ""; }
+
+h1 {
+  font-size: clamp(2rem, 5.5vw, 3rem);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  margin: 0 0 1rem;
+  text-wrap: balance;
+  max-width: 20ch;
+}
+.standfirst {
+  font-size: 1.075rem;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 54ch;
+  text-wrap: pretty;
+}
+
+/* ---------- 关键数字条 ---------- */
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 3.5rem;
+}
+.figure {
+  padding: 1.5rem 1.25rem 1.5rem 0;
+  border-right: 1px solid var(--rule);
+}
+.figure:last-child { border-right: 0; }
+.figure dt {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0.4rem;
+}
+.figure dd {
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  margin: 0;
+  line-height: 1.1;
+}
+.figure dd small {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--ink-3);
+  letter-spacing: 0;
+}
+
+/* ---------- 章节 ---------- */
+
+.part { margin: 4.5rem 0 0; }
+.part-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  border-bottom: 1px solid var(--ink);
+  padding-bottom: 0.6rem;
+  margin-bottom: 2.25rem;
+}
+.part-num {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  color: var(--signal);
+  text-transform: uppercase;
+  flex: none;
+}
+.part-head h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.part-note {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  flex: none;
+}
+
+h3 {
+  font-size: 1.14rem;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  margin: 0 0 0.35rem;
+  text-wrap: balance;
+}
+
+p { margin: 0 0 1.15rem; text-wrap: pretty; }
+p:last-child { margin-bottom: 0; }
+
+a { color: var(--signal); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+strong { font-weight: 700; }
+code, .m {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  font-variant-numeric: tabular-nums;
+}
+code {
+  background: var(--surface-2);
+  padding: 0.1em 0.36em;
+  color: var(--ink);
+}
+
+/* ---------- 发现条目 ---------- */
+
+.finding {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  padding: 0 0 2.75rem;
+  margin-bottom: 2.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+.finding:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0.5rem; }
+
+.finding-head { display: flex; flex-direction: column; gap: 0.55rem; max-width: var(--col); }
+
+.rank {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.07em;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid currentColor;
+  text-transform: uppercase;
+}
+.chip::before {
+  content: "";
+  width: 0.45rem; height: 0.45rem;
+  background: currentColor;
+  border-radius: 50%;
+  flex: none;
+}
+.chip.proven   { color: var(--alarm); background: var(--alarm-soft); }
+.chip.high     { color: var(--warn);  background: var(--warn-soft); }
+.chip.medium   { color: var(--signal); background: var(--signal-soft); }
+
+.finding-body { max-width: var(--col); }
+
+/* ---------- 证据面板 ---------- */
+
+.evidence {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-top: 2px solid var(--rule-strong);
+  padding: 1.35rem 1.5rem 1.5rem;
+  overflow-x: auto;
+}
+.evidence-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0.9rem;
+}
+.evidence p { font-size: 0.94rem; }
+.evidence p:last-child { margin-bottom: 0; }
+
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.65;
+  margin: 0;
+  overflow-x: auto;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+pre b { color: var(--ink); font-weight: 600; }
+pre .bad { color: var(--alarm); font-weight: 600; }
+pre .good { color: var(--ok); font-weight: 600; }
+
+/* ---------- 字节布局图 ---------- */
+
+.bytes { display: flex; flex-direction: column; gap: 1.4rem; min-width: 33rem; }
+.byterow { display: flex; flex-direction: column; gap: 0.4rem; }
+.byterow-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+.byterow-label b { color: var(--ink); }
+.cells { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; }
+.cell {
+  font-family: var(--font-mono);
+  font-size: 0.63rem;
+  text-align: center;
+  padding: 0.5rem 0.1rem;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  line-height: 1.35;
+  border: 1px solid transparent;
+}
+.cell b { display: block; font-size: 0.6rem; color: var(--ink-3); font-weight: 400; }
+.cell.tag    { background: var(--surface-2); }
+.cell.seq    { background: var(--signal-soft); color: var(--signal); border-color: var(--signal); }
+.cell.smeter { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
+.cell.audio  { background: transparent; border-color: var(--rule-strong); }
+.cell.wrong  { background: var(--alarm-soft); color: var(--alarm); border-color: var(--alarm); }
+.ruler { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; }
+.ruler span {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-align: center;
+  color: var(--ink-3);
+}
+
+/* ---------- 图表 ---------- */
+
+figure { margin: 0; }
+figcaption {
+  font-size: 0.83rem;
+  color: var(--ink-2);
+  margin-top: 0.85rem;
+  max-width: 62ch;
+}
+figcaption b { color: var(--ink); font-weight: 600; }
+.chart-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0 0 0.15rem;
+}
+.chart-sub {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--ink-3);
+  margin: 0 0 1rem;
+}
+#spectrum { width: 100%; height: auto; display: block; touch-action: none; cursor: crosshair; }
+.readout {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-2);
+  margin-top: 0.5rem;
+  min-height: 1.2em;
+  font-variant-numeric: tabular-nums;
+}
+.readout b { color: var(--ink); }
+
+/* ---------- 表格 ---------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.9rem 0.5rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+th {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 400;
+  border-bottom-color: var(--rule-strong);
+  white-space: nowrap;
+}
+td.num { font-family: var(--font-mono); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+
+/* ---------- 建议卡 ---------- */
+
+.tier { margin-bottom: 3rem; }
+.tier:last-child { margin-bottom: 0; }
+.tier-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+.tier-tag {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid currentColor;
+  flex: none;
+}
+.tier-1 { color: var(--alarm); background: var(--alarm-soft); }
+.tier-2 { color: var(--signal); background: var(--signal-soft); }
+.tier-3 { color: var(--ink-3); }
+.tier-head h3 { margin: 0; }
+.tier-why {
+  color: var(--ink-2);
+  font-size: 0.95rem;
+  max-width: var(--col);
+  margin: 0 0 1.5rem;
+}
+
+.props { display: flex; flex-direction: column; gap: 0; }
+.prop {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  padding: 1.4rem 0;
+  border-top: 1px solid var(--rule);
+}
+.prop:last-child { border-bottom: 1px solid var(--rule); }
+.prop-head { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; }
+.prop-head h4 {
+  font-size: 1.02rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+.effort {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  margin-left: auto;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.prop p { font-size: 0.95rem; margin: 0; max-width: var(--col); color: var(--ink-2); }
+.prop p + p { margin-top: 0.7rem; }
+.prop p b { color: var(--ink); }
+
+.hook {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--signal);
+  letter-spacing: 0.02em;
+  margin-top: 0.55rem;
+}
+
+/* ---------- 路线 ---------- */
+
+.route { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+.route li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 2.6rem 1fr;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+  align-items: baseline;
+}
+.route li::before {
+  content: counter(step, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--signal);
+  font-variant-numeric: tabular-nums;
+}
+.route b { font-weight: 700; }
+.route span { color: var(--ink-2); font-size: 0.95rem; }
+
+footer {
+  margin-top: 4.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--ink-3);
+  line-height: 1.9;
+}
+
+@media (max-width: 640px) {
+  body { padding: 0 1.15rem 4rem; font-size: 15.5px; }
+  .masthead { padding-top: 3rem; }
+  .figure { padding-right: 0.9rem; }
+  .part-note { display: none; }
+  .prop-head { gap: 0.4rem; }
+  .effort { margin-left: 0; width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">
+      <span>MilRadio v1.2</span><span>KiwiSDR / HFGCS</span><span>2026-06-02 → 06-09</span>
+    </p>
+    <h1>信号链审计与功能路线</h1>
+    <p class="standfirst">
+      系统跑通了：747 段录音、744 条信号记录、18 个测试全绿。但审计这批数据发现，
+      信号链上有三处缺陷让"测量结果"其实并不是在测量信号——修好它们之前，
+      任何新功能都是建在坏读数上的。
+    </p>
+  </header>
+
+  <dl class="figures">
+    <div class="figure"><dt>录音</dt><dd>747 <small>段 / 154 MB</small></dd></div>
+    <div class="figure"><dt>信号记录</dt><dd>744 <small>条</small></dd></div>
+    <div class="figure"><dt>S-meter 有效值</dt><dd>0 <small>/ 744</small></dd></div>
+    <div class="figure"><dt>调制判定靠掷骰</dt><dd>690 <small>/ 701</small></dd></div>
+    <div class="figure"><dt>用到的频率</dt><dd>2 <small>/ 20</small></dd></div>
+  </dl>
+
+  <!-- ============================================================ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="part-num">第一部分</span>
+      <h2>读数可信度</h2>
+      <span class="part-note">按严重程度排序</span>
+    </div>
+
+    <!-- 缺陷 1 -->
+    <article class="finding">
+      <div class="finding-head">
+        <p class="rank">
+          <span>缺陷 01</span>
+          <span class="chip proven">数据实证</span>
+        </p>
+        <h3>音频帧解析偏移 2 字节，S-meter 记录的其实是帧计数器</h3>
+      </div>
+
+      <div class="finding-body">
+        <p>
+          <code>kiwi_client.py</code> 把 <code>SND</code> 帧的 body 解析成
+          <span class="m">flags(1) + seq(2, 大端) + smeter(2) + 音频</span>。
+          但数据库里的 S-meter 值出卖了真实布局：全部 744 条记录只有
+          <strong>16 个不同取值</strong>，而且每一个反推回原始整数都是
+          <strong>256 的整数倍</strong>。
+        </p>
+      </div>
+
+      <div class="evidence">
+        <p class="evidence-label">证据 A — S-meter 列的全部取值</p>
+<pre>SELECT DISTINCT s_meter_dbm FROM signals;   → 16 行
+
+反推 raw = (dBm + 160) / 150 × 65535 :
+  <span class="bad">0   256   512   768   1024  1280  1536  1792
+  2048  2560  3584  4864  5632  6656  7424  7680</span>
+
+全部 ≡ 0 (mod 256)   →  低字节恒为 0x00
+真实 S-meter 会在 0–4095 连续抖动，绝不会这样。
+
+<b>676 / 744 条记录的 S-meter = 恰好 -160.0 dBm</b>（raw = 0）</pre>
+        <p>
+          这些值是<strong>小端 uint32 帧计数器的高位字节</strong>：若
+          <span class="m">body[1:5]</span> 是 seq，则 <span class="m">body[3] = ⌊seq/65536⌋</span>、
+          <span class="m">body[4] = 0</span>——正好解释了"256 的倍数"和"短会话恒为 0、长会话逐级增大"。
+        </p>
+      </div>
+
+      <div class="evidence">
+        <p class="evidence-label">证据 B — 帧布局对照</p>
+        <div class="bytes">
+          <div class="byterow">
+            <p class="byterow-label">代码当前的解析 — <b class="m">audio = body[5:]</b></p>
+            <div class="cells">
+              <div class="cell tag">S<b>0</b></div>
+              <div class="cell tag">N<b>1</b></div>
+              <div class="cell tag">D<b>2</b></div>
+              <div class="cell seq">flags<b>3</b></div>
+              <div class="cell seq">seq<b>4</b></div>
+              <div class="cell seq">seq<b>5</b></div>
+              <div class="cell wrong">smtr<b>6</b></div>
+              <div class="cell wrong">smtr<b>7</b></div>
+              <div class="cell wrong">音频<b>8</b></div>
+              <div class="cell wrong">音频<b>9</b></div>
+              <div class="cell audio">音频<b>10</b></div>
+              <div class="cell audio">音频<b>11</b></div>
+            </div>
+          </div>
+          <div class="byterow">
+            <p class="byterow-label">数据指向的真实布局 — <b class="m">audio = body[7:]</b></p>
+            <div class="cells">
+              <div class="cell tag">S<b>0</b></div>
+              <div class="cell tag">N<b>1</b></div>
+              <div class="cell tag">D<b>2</b></div>
+              <div class="cell seq">flags<b>3</b></div>
+              <div class="cell seq">seq₀<b>4</b></div>
+              <div class="cell seq">seq₁<b>5</b></div>
+              <div class="cell seq">seq₂<b>6</b></div>
+              <div class="cell seq">seq₃<b>7</b></div>
+              <div class="cell smeter">smtr<b>8</b></div>
+              <div class="cell smeter">smtr<b>9</b></div>
+              <div class="cell audio">音频<b>10</b></div>
+              <div class="cell audio">音频<b>11</b></div>
+            </div>
+          </div>
+        </div>
+        <p style="margin-top:1.2rem">
+          seq 是 <strong>4 字节小端</strong>而非 2 字节大端，S-meter 在 <span class="m">body[5:7]</span>，
+          音频从 <span class="m">body[7:]</span> 开始。当前代码从 <span class="m">body[5:]</span> 起取音频，
+          于是<strong>每帧多出 1 个假样本</strong>——就是那两个 S-meter 字节被当成了一个 int16。
+        </p>
+      </div>
+
+      <div class="evidence">
+        <p class="evidence-label">证据 C — 每段录音里的周期性脉冲</p>
+        <figure>
+          <p class="chart-title">录音低频段频谱</p>
+          <p class="chart-sub">20260604_153545_11175.0kHz_KPH_California.wav · 140.5 s · 12 kHz</p>
+          <svg id="spectrum" viewBox="0 0 760 300" role="img"
+               aria-label="录音 0–140 Hz 频谱，在 23.4 Hz 及其各次谐波处出现尖峰，比周围底噪高 10 至 18 dB。"></svg>
+          <p class="readout" id="readout">把指针移到图上可读取数值</p>
+          <figcaption>
+            尖峰落在 <b>23.4 / 46.9 / 70.1 / 93.8 / 116.8 Hz</b>——正是
+            <b>12000 ÷ 512 = 23.4375 Hz</b> 音频帧率的 1 至 5 次谐波，比周围底噪高 10–18 dB。
+            每帧插入一个假样本，得到的就是这样一列帧率谐波。
+            <b>747 段录音全部带着这个嗡声</b>，而且它落在 USB 通带（300–3000 Hz）之外，
+            靠滤波器是滤不掉的，因为它是在解调之后才被注入的。
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="finding-body">
+        <p>
+          此外 dBm 换算公式本身也不对。<code>raw/65535×150−160</code> 是凭空拟的；
+          KiwiSDR 的实际换算是 <code>0.1 × (raw &amp; 0x0FFF) − 127</code>。
+          两件事叠加的结果是：<strong>S-meter 这一列从来没有记录过任何真实的信号强度</strong>，
+          依赖它的图表、阈值和对比全部落空。
+        </p>
+      </div>
+    </article>
+
+    <!-- 缺陷 2 -->
+    <article class="finding">
+      <div class="finding-head">
+        <p class="rank">
+          <span>缺陷 02</span>
+          <span class="chip proven">数据实证</span>
+        </p>
+        <h3>调制识别的结果由字典顺序决定，不由信号决定</h3>
+      </div>
+
+      <div class="finding-body">
+        <p>
+          <code>_estimate_modulation()</code> 给带宽 2 分、平坦度 1 分、峰均比 1 分。
+          问题在于<strong>带宽这一项测的是接收机的滤波器，不是信号</strong>：
+          客户端把 USB 通带写死成 300–3000 Hz，所以无论对面发的是语音、FSK 还是纯噪声，
+          量出来的带宽都是同一个数。
+        </p>
+      </div>
+
+      <div class="evidence">
+        <p class="evidence-label">证据 — 带宽毫无区分度</p>
+        <table>
+          <thead>
+            <tr><th>判定类型</th><th>数量</th><th>平均带宽</th><th>平均 SNR</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>USB_VOICE</td><td class="num">691</td><td class="num">2759 Hz</td><td class="num">5.8 dB</td></tr>
+            <tr><td>NOISE</td><td class="num">43</td><td class="num">2782 Hz</td><td class="num">2.5 dB</td></tr>
+            <tr><td>PSK</td><td class="num">10</td><td class="num">2784 Hz</td><td class="num">5.6 dB</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:1.1rem">
+          三个"不同"的调制类型，平均带宽差 25 Hz（&lt;1%）。全库带宽
+          <span class="m">min 932 / max 2846 / avg 2760 Hz</span>——一根柱子。
+        </p>
+      </div>
+
+      <div class="evidence">
+        <p class="evidence-label">证据 — 用真实数据重跑打分器</p>
+<pre>对 744 条 analysis 记录重放 _estimate_modulation() 的打分：
+
+  最高分只有 1 个类型独得   <span class="good">10</span> 条
+  最高分 2 个类型并列        <span class="bad">1</span> 条
+  最高分 <b>3 个类型并列</b>        <span class="bad">690</span> 条   ← 98.4%
+
+  满分 4 分的            1 条
+  只得 3 分的          700 条
+
+并列时 max() 取字典里第一个命中的键。
+MODULATION_PROFILES 的第一项恰好是 <b>USB_VOICE</b>。</pre>
+        <p>
+          所以"93% 的信号是 USB 语音"不是一个观测结果，
+          它只是 <span class="m">MODULATION_PROFILES</span> 的书写顺序。
+        </p>
+      </div>
+    </article>
+
+    <!-- 缺陷 3 -->
+    <article class="finding">
+      <div class="finding-head">
+        <p class="rank">
+          <span>缺陷 03</span>
+          <span class="chip high">高</span>
+        </p>
+        <h3>SNR 把滤波器阻带当成了噪声基准</h3>
+      </div>
+
+      <div class="finding-body">
+        <p>
+          <code>_estimate_snr()</code> 取峰值两侧 ±10% 频谱当信号、其余当噪声。
+          但频谱跨度是 0–6000 Hz，而信号只可能存在于 300–3000 Hz——
+          "噪声区"里塞了一大片 3000–6000 Hz 的<strong>滤波器阻带</strong>。
+          那里几乎没有能量，于是分母被压低，SNR 被系统性地扭曲。
+        </p>
+        <p>
+          症状在分布上很明显：<span class="m">385/744</span> 落在 3–6 dB，
+          <span class="m">310/744</span> 落在 6–10 dB，<strong>只有 6 条超过 10 dB</strong>。
+          一段清晰可辨的 EAM 语音，真实带内 SNR 应当在 20 dB 以上。
+          现在这个指标既区分不开好坏信号，也没法用来卡阈值。
+        </p>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================================================ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="part-num">第二部分</span>
+      <h2>采集策略</h2>
+      <span class="part-note">7 天 / 32 次会话</span>
+    </div>
+
+    <article class="finding">
+      <div class="finding-head">
+        <h3>过半"信号"其实只是静噪的尾巴</h3>
+      </div>
+      <div class="finding-body">
+        <p>
+          <span class="m">tail_time = 3.0 s</span>，意味着任何一次触发至少产出 3 秒录音。
+          而时长分布里 <strong>424/744（57%）落在 3–5 秒</strong>——
+          真实信号部分不到 2 秒，比一次台标呼号还短。
+        </p>
+        <p>
+          反方向也有问题：<strong>84 次</strong>信号在同频率上距上一条不到 8 秒就开始，
+          这是<strong>同一次通话被切成了多条记录</strong>。
+          一边把噪声记成信号，一边把一次通话记成好几次，
+          所以"信号数"和"平均时长"两个统计量目前都不能用。
+        </p>
+      </div>
+    </article>
+
+    <article class="finding">
+      <div class="finding-head">
+        <h3>频率库有 20 个频率，实际只用过 2 个</h3>
+      </div>
+      <div class="finding-body">
+        <p>
+          <code>frequencies.yaml</code> 编了 5 个网络共 20 个频率，
+          数据库里却只有 <span class="m">11175</span>（679 条）和 <span class="m">8992</span>（65 条）。
+          <code>max_concurrent: 2</code> 这个配置项从来没有被任何代码读过——
+          监听始终是单连接、单频率。
+        </p>
+        <p>
+          这恰好错过了这个领域里最有价值的一个特性：
+          <strong>HFGCS 是同播网络</strong>，同一条 EAM 会在 4724 / 6712 / 8992 / 11175 / 13200 / 15016
+          上同时发出。一次只听一个频率，等于主动扔掉了唯一一个可以<strong>互相印证</strong>的信息源。
+        </p>
+      </div>
+    </article>
+
+    <article class="finding">
+      <div class="finding-head">
+        <h3>会话生命周期泄漏</h3>
+      </div>
+      <div class="finding-body">
+        <p>
+          <span class="m">32 次会话里有 18 次</span> 的 <code>end_time</code> 是 NULL、状态仍是
+          <code>running</code>。Ctrl+C 与异常退出的路径没有走到 <code>end_session()</code>。
+          任何按会话时长归一化的指标（每小时信号数、节点在线率）现在都算不出来。
+          修法很轻：进程退出时把所有 <code>running</code> 会话标记为 <code>interrupted</code>。
+        </p>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================================================ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="part-num">第三部分</span>
+      <h2>工程卫生</h2>
+      <span class="part-note">.git = 180 MB</span>
+    </div>
+
+    <div class="col">
+      <p>
+        仓库里没有 <code>.gitignore</code>，于是 <strong>764 个 WAV、SQLite 数据库本体、
+        20 个 <code>.pyc</code></strong> 全部进了版本库。代码本身只有 9,336 行，
+        <code>.git</code> 却已经 180 MB，而且这个数字只会随着监听时长单调增长。
+      </p>
+      <p>
+        另外根目录还躺着一个 0 字节的文件 <code>=</code>（一次重定向手误），
+        以及 8 个一次性排查脚本（<code>check_*.py</code>、<code>diagnose_*.py</code>、
+        <code>inspect_frames.py</code>、<code>example_*.py</code>）。
+        它们当时都有用，但现在和正式模块混在同一层，新人分不清哪些是系统的一部分。
+      </p>
+      <p>
+        测试是 18 个全绿，覆盖 squelch / db / analyzer。
+        <strong>唯独没有一个测试碰过 <code>kiwi_client</code> 的帧解析</strong>——
+        而这正是缺陷 01 藏身的地方。一个喂进构造帧、断言解出的样本数与 S-meter 的单元测试，
+        当初就能挡住它。
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="part-num">第四部分</span>
+      <h2>新功能建议</h2>
+      <span class="part-note">分三层，后层依赖前层</span>
+    </div>
+
+    <!-- Tier 1 -->
+    <div class="tier">
+      <div class="tier-head">
+        <span class="tier-tag tier-1">第一层</span>
+        <h3>把地基修成可信的</h3>
+      </div>
+      <p class="tier-why">
+        这三项不是"新功能"，但它们决定了后面所有功能是否有意义。
+        在坏读数上做告警、做分类、做关联，只会把错误放大。
+      </p>
+
+      <div class="props">
+        <div class="prop">
+          <div class="prop-head">
+            <h4>真实 S-meter → 用 dBm 做静噪门限</h4>
+            <span class="effort">半天</span>
+          </div>
+          <p>
+            修好帧解析后，S-meter 立刻变成一个真实可用的信号强度序列。
+            这带来一个当前架构拿不到的能力：<b>门限可以用 dBm 表达</b>。
+          </p>
+          <p>
+            现在的 <code>open_threshold: 0.10</code> 是 RMS 值，
+            而 RMS 取决于对面节点的 AGC 设置——CHANGELOG 里 0.65 → 0.15 → 0.10 三次手调，
+            调的其实是"KPH 这个节点的 AGC"。换个节点这个数就又不对了。
+            dBm 门限是节点无关的，一次设定处处适用。
+          </p>
+          <p class="hook">前置：缺陷 01 · 顺带消除全部录音里的 23.4 Hz 嗡声</p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>自适应噪声基底静噪</h4>
+            <span class="effort">1–2 天</span>
+          </div>
+          <p>
+            把固定门限换成<b>滚动噪声基底 + 固定余量</b>：持续统计近 N 分钟 RMS 的低分位数
+            （比如 20th percentile）作为基底，开启门限取"基底 + 6 dB"。
+          </p>
+          <p>
+            它同时解决两个方向的问题——白天电离层条件变化、换节点、换频段时不再需要手调，
+            并且能自动收紧那 57% 的短触发。这是对<b>反复手调阈值</b>这件事的一次性了结。
+          </p>
+          <p class="hook">直接针对：57% 垃圾录音 + 三次手工调参的历史</p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>通话缝合（transmission stitching）</h4>
+            <span class="effort">半天</span>
+          </div>
+          <p>
+            同频率上间隔小于 N 秒（建议 15 s）的相邻信号，合并成一条逻辑通话，
+            数据库加一层 <code>transmissions</code> 表，<code>signals</code> 作为其片段。
+          </p>
+          <p>
+            立刻修正那 <b>84 次被切碎的通话</b>，让"时长分布""每小时通话数"这些统计第一次变得可信。
+            报告里的图表不用改，换个数据源即可。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tier 2 -->
+    <div class="tier">
+      <div class="tier-head">
+        <span class="tier-tag tier-2">第二层</span>
+        <h3>真正的新能力</h3>
+      </div>
+      <p class="tier-why">
+        地基修好后，这几项能让项目从"录音机 + 统计"变成"能回答问题的仪器"。
+        按价值排序。
+      </p>
+
+      <div class="props">
+        <div class="prop">
+          <div class="prop-head">
+            <h4>多频率并行监听 + 同播交叉验证</h4>
+            <span class="effort">3–5 天 · 旗舰</span>
+          </div>
+          <p>
+            开 N 条并发 KiwiSDR 通道（<code>max_concurrent</code> 终于派上用场），
+            同时盯住 HFGCS 同播频率组。然后做一件单频率永远做不到的事：
+            <b>同一条 EAM 在 8992 和 11175 上 ±2 秒内同时出现 → 判定为真实发射</b>。
+          </p>
+          <p>
+            这是比任何单通道启发式规则都强的垃圾过滤器——本地噪声、脉冲干扰、
+            邻频串扰都不可能在两个相隔 2 MHz 的频率上同时出现。它<b>用物理规律代替阈值</b>。
+          </p>
+          <p>
+            附带产出一张自己测出来的传播表：哪个频率在哪个时段 SNR 最好。
+            你现在的数据只能说"11175 有 679 条"，不能说"11175 在 13 UTC 比 8992 好 8 dB"。
+          </p>
+          <p class="hook">前置：第一层全部 · 单节点通道数通常允许 4–8 路</p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>EAM 报文结构识别</h4>
+            <span class="effort">2–4 天</span>
+          </div>
+          <p>
+            EAM 有极强的结构特征：呼叫前导、<i>SKYKING SKYKING DO NOT ANSWER</i>、
+            一串音标字母、<b>然后整段重复一遍</b>。这个"重复"是免费的分类器——
+            对包络做自相关，通话内部出现高相关的重复段 → 是格式化报文；
+            日常空管闲聊不会重复。不需要任何语音识别就能拿到。
+          </p>
+          <p>
+            再进一步可以接 Whisper 转写那串音标字母。你已经有
+            <code>fetch_public_logs.py</code> 和 <code>compare_eam.py</code> 在抓 EAM.watch 的
+            ground truth——一旦能转写，对比就从<b>"时间戳撞上了"升级成"报文内容对上了"</b>。
+          </p>
+          <p class="hook">复用：现成的 EAM.watch 抓取与对比管线</p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>换掉调制识别的特征集</h4>
+            <span class="effort">2–3 天</span>
+          </div>
+          <p>
+            带宽在固定通带下没有区分度，得换成在 300–3000 Hz 窗口内依然有效的特征：
+          </p>
+          <p>
+            <b>包络调制谱</b>——语音的音节率集中在 3–8 Hz，数字信号没有；
+            <b>符号率估计</b>——对包络自相关可以直接读出波特率
+            （STANAG 4285 = 2400 Bd，4481 = 75 Bd），这比"看带宽猜"精确一个量级；
+            <b>音调数与间距</b>——FSK 的双音特征在窄带里反而更清楚。
+            这三个特征加起来，才是真的在识别调制。
+          </p>
+          <p class="hook">前置：缺陷 03（SNR 基准）一并修正</p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>传播条件关联</h4>
+            <span class="effort">1 天 · 性价比最高</span>
+          </div>
+          <p>
+            NOAA SWPC 提供免费 JSON 接口：Kp 地磁指数、F10.7 太阳流量、X 射线耀斑等级。
+            拉下来存一张表，和信号检测按时间 join。
+          </p>
+          <p>
+            一次 HTTP 请求 + 一张表的成本，换来的是回答
+            <b>"11175 为什么在 15 UTC 突然安静了"</b>的能力——
+            是没人发报，还是 D 层吸收把它吃了？这是把日志变成仪器的最短路径。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tier 3 -->
+    <div class="tier">
+      <div class="tier-head">
+        <span class="tier-tag tier-3">第三层</span>
+        <h3>体验与运维</h3>
+      </div>
+      <p class="tier-why">
+        成本都不高，但直接决定这套系统日常用起来顺不顺手。
+      </p>
+
+      <div class="props">
+        <div class="prop">
+          <div class="prop-head">
+            <h4>实时瀑布图</h4>
+            <span class="effort">1–2 天</span>
+          </div>
+          <p>
+            <code>analyzer.get_spectrogram()</code> 已经写好了，但 Web 界面从来没调用过。
+            现在中央区域只有一条 RMS 折线——而瀑布图是任何 SDR 界面里信息密度最高的控件，
+            后端已经就位，缺的只是一个 canvas。
+          </p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>录音浏览与回放</h4>
+            <span class="effort">1 天</span>
+          </div>
+          <p>
+            747 段录音、154 MB，目前<b>没有任何界面能听</b>，只能去文件夹里翻。
+            信号列表 + 内嵌 <code>&lt;audio&gt;</code> + 频谱缩略图，
+            让"回去听听那条到底是什么"变成一次点击。
+          </p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>高置信度检测推送</h4>
+            <span class="effort">半天</span>
+          </div>
+          <p>
+            24/7 监听如果要等人打开报告才知道抓到了什么，那 24/7 就没有意义。
+            交叉验证判定为真实 EAM 时，推一条通知并附上音频片段。
+          </p>
+          <p class="hook">前置：同播交叉验证（否则会被误报淹没）</p>
+        </div>
+
+        <div class="prop">
+          <div class="prop-head">
+            <h4>数据留存策略</h4>
+            <span class="effort">半天</span>
+          </div>
+          <p>
+            先补 <code>.gitignore</code>（<code>data/</code>、<code>__pycache__/</code>、
+            <code>*.pyc</code>、<code>reports/*.png</code>），把 WAV 和数据库移出版本库；
+            再加一条留存规则：垃圾录音 N 天后自动清、有效录音转 FLAC 无损压缩。
+          </p>
+          <p>
+            顺手删掉根目录那个 0 字节的 <code>=</code>，把一次性排查脚本收进
+            <code>tools/</code>。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section class="part">
+    <div class="part-head">
+      <span class="part-num">建议顺序</span>
+      <h2>怎么走</h2>
+    </div>
+
+    <ol class="route">
+      <li><span><b>补一个 <code>kiwi_client</code> 帧解析的单元测试</b>，喂进构造好的 SND 帧，断言样本数、seq、S-meter。先让缺陷 01 变成一个红色的测试。</span></li>
+      <li><span><b>修帧偏移与 dBm 换算</b>，跑一段新录音，确认 23.4 Hz 谐波消失、S-meter 开始连续抖动。</span></li>
+      <li><span><b>会话泄漏 + 通话缝合</b>——两处都很小，做完统计量才开始可信。</span></li>
+      <li><span><b>换 SNR 基准</b>（只在 300–3000 Hz 带内算），顺手把调制识别的并列问题一起处理。</span></li>
+      <li><span><b>自适应噪声基底静噪</b>，用修好的读数重新标定一次。</span></li>
+      <li><span><b>多频率并行 + 同播交叉验证</b>——到这里才值得做，因为它依赖前面每一项。</span></li>
+      <li><span>之后按兴趣挑：传播关联性价比最高，瀑布图最好看，EAM 结构识别最有意思。</span></li>
+    </ol>
+  </section>
+
+  <footer>
+    审计基于仓库快照与 data/radio_monitor.db（744 条信号 / 747 段录音 / 2026-06-02 至 06-09）。<br>
+    结论中的每个数字均由查询该数据库或直接分析录音得出，未使用估算。<br>
+    测试现状：18 passed。
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var RAW = "0.0,-0.77 0.55,-19.01 1.1,-16.49 1.83,-15.95 2.38,-15.1 3.11,-15.78 3.66,-19.56 4.39,-17.86 4.94,-19.76 5.68,-19.8 6.23,-17.84 6.96,-18.89 7.51,-17.16 8.24,-17.5 8.79,-16.93 9.52,-17.91 10.07,-19.68 10.8,-18.38 11.35,-16.88 12.08,-19.05 12.63,-17.38 13.37,-15.45 13.92,-16.24 14.65,-17.09 15.2,-23.04 15.93,-19.01 16.48,-15.11 17.21,-16.03 17.76,-14.24 18.49,-14.42 19.04,-20.43 19.78,-16.47 20.32,-19.97 21.06,-16.93 21.61,-17.82 22.34,-17.49 22.89,-19.82 23.62,-8.31 24.17,-14.2 24.9,-15.4 25.45,-17.75 26.18,-17.24 26.73,-21.53 27.47,-20.14 28.02,-16.65 28.56,-16.68 29.3,-15.77 29.85,-18.05 30.58,-16.74 31.13,-16.31 31.86,-14.53 32.41,-16.38 33.14,-16.71 33.69,-17.65 34.42,-15.35 34.97,-19.38 35.71,-22.22 36.25,-17.36 36.99,-17.73 37.54,-14.84 38.27,-17.66 38.82,-16.52 39.55,-15.13 40.1,-18.35 40.83,-16.66 41.38,-19.79 42.11,-15.35 42.66,-15.98 43.4,-14.88 43.95,-16.07 44.68,-18.89 45.23,-19.42 45.96,-18.68 46.51,-12.27 47.24,-16.15 47.79,-18.79 48.52,-18.07 49.07,-15.81 49.8,-14.28 50.35,-15.53 51.09,-16.05 51.64,-17.35 52.37,-19.18 52.92,-12.63 53.65,-14.7 54.2,-11.91 54.93,-13.86 55.48,-18.1 56.03,-19.85 56.76,-17.48 57.31,-15.62 58.04,-15.07 58.59,-15.83 59.33,-17.61 59.88,-15.94 60.61,-14.46 61.16,-20.91 61.89,-17.97 62.44,-20.17 63.17,-14.64 63.72,-16.03 64.45,-15.65 65.0,-17.19 65.73,-20.93 66.28,-14.77 67.02,-20.52 67.57,-13.11 68.3,-12.85 68.85,-15.4 69.58,-14.64 70.13,-0.8 70.86,-14.24 71.41,-17.37 72.14,-20.94 72.69,-17.55 73.43,-18.37 73.97,-16.68 74.71,-11.54 75.26,-13.86 75.99,-12.77 76.54,-20.97 77.27,-23.28 77.82,-14.14 78.55,-16.25 79.1,-11.52 79.83,-12.59 80.38,-16.32 81.12,-15.14 81.67,-20.87 82.4,-16.58 82.95,-13.15 83.68,-19.13 84.23,-12.72 84.78,-29.35 85.51,-21.94 86.06,-19.92 86.79,-19.57 87.34,-14.69 88.07,-17.78 88.62,-14.06 89.36,-11.39 89.9,-12.36 90.64,-11.0 91.19,-24.57 91.92,-20.57 92.47,-13.78 93.2,-16.0 93.75,-5.17 94.48,-15.41 95.03,-12.55 95.76,-15.24 96.31,-14.77 97.05,-16.37 97.6,-20.2 98.33,-19.24 98.88,-13.93 99.61,-13.09 100.16,-12.18 100.89,-11.86 101.44,-13.12 102.17,-10.36 102.72,-13.94 103.45,-12.91 104.0,-13.31 104.74,-12.65 105.29,-11.21 106.02,-12.83 106.57,-18.25 107.3,-13.77 107.85,-18.59 108.58,-12.61 109.13,-19.72 109.86,-12.64 110.41,-14.71 111.15,-11.14 111.69,-15.03 112.24,-18.26 112.98,-15.07 113.53,-9.36 114.26,-11.22 114.81,-12.43 115.54,-12.96 116.09,-14.09 116.82,-2.45 117.37,-16.04 118.1,-14.9 118.65,-14.7 119.38,-14.87 119.93,-12.21 120.67,-13.34 121.22,-9.2 121.95,-13.26 122.5,-18.87 123.23,-16.34 123.78,-17.27 124.51,-10.17 125.06,-10.94 125.79,-8.25 126.34,-13.33 127.08,-15.78 127.62,-20.73 128.36,-18.1 128.91,-8.67 129.64,-11.85 130.19,-13.1 130.92,-11.62 131.47,-19.51 132.2,-15.62 132.75,-15.98 133.48,-10.73 134.03,-11.99 134.77,-16.34 135.31,-17.83 136.05,-15.64 136.6,-9.61 137.33,-12.06 137.88,-16.31 138.61,-14.59 139.16,-9.23 139.89,-11.82";
+
+  var pts = RAW.split(" ").map(function (s) {
+    var p = s.split(",");
+    return { f: parseFloat(p[0]), db: parseFloat(p[1]) };
+  });
+
+  var svg = document.getElementById("spectrum");
+  var readout = document.getElementById("readout");
+  if (!svg) { return; }
+
+  var W = 760, H = 300;
+  var M = { t: 14, r: 16, b: 40, l: 44 };
+  var pw = W - M.l - M.r, ph = H - M.t - M.b;
+
+  var FMAX = 140, DBMIN = -32, DBMAX = 2;
+  var x = function (f) { return M.l + (f / FMAX) * pw; };
+  var y = function (d) { return M.t + (1 - (d - DBMIN) / (DBMAX - DBMIN)) * ph; };
+
+  var NS = "http://www.w3.org/2000/svg";
+  function el(name, attrs, text) {
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) { n.setAttribute(k, attrs[k]); }
+    if (text !== undefined) { n.textContent = text; }
+    svg.appendChild(n);
+    return n;
+  }
+
+  var mono = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+
+  // --- 网格与坐标轴（后退到背景） ---
+  [-30, -20, -10, 0].forEach(function (d) {
+    el("line", { x1: M.l, x2: M.l + pw, y1: y(d), y2: y(d),
+                 stroke: "var(--rule)", "stroke-width": 1 });
+    el("text", { x: M.l - 9, y: y(d) + 4, "text-anchor": "end",
+                 "font-family": mono, "font-size": 10.5, fill: "var(--ink-3)" }, d);
+  });
+  el("text", { x: M.l - 9, y: M.t - 3, "text-anchor": "end",
+               "font-family": mono, "font-size": 9.5, fill: "var(--ink-3)" }, "dB");
+
+  [0, 23.4, 46.9, 70.1, 93.8, 116.8, 140].forEach(function (f) {
+    el("text", { x: x(f), y: H - 20, "text-anchor": "middle",
+                 "font-family": mono, "font-size": 10.5, fill: "var(--ink-3)" },
+       f === 0 ? "0" : f.toFixed(1));
+  });
+  el("text", { x: M.l + pw / 2, y: H - 4, "text-anchor": "middle",
+               "font-family": mono, "font-size": 10, fill: "var(--ink-3)",
+               "letter-spacing": "0.08em" }, "频率 (Hz)");
+
+  el("line", { x1: M.l, x2: M.l + pw, y1: y(DBMIN), y2: y(DBMIN),
+               stroke: "var(--rule-strong)", "stroke-width": 1 });
+
+  // --- 谐波位置的引导线（先画，压在迹线之下） ---
+  var harmonics = [23.4375, 46.875, 70.3125, 93.75, 117.1875];
+  harmonics.forEach(function (f) {
+    el("line", { x1: x(f), x2: x(f), y1: M.t, y2: y(DBMIN),
+                 stroke: "var(--alarm)", "stroke-width": 1,
+                 "stroke-dasharray": "2 4", opacity: 0.45 });
+  });
+
+  // --- 频谱迹线 ---
+  var d = pts.map(function (p, i) {
+    return (i ? "L" : "M") + x(p.f).toFixed(2) + " " + y(p.db).toFixed(2);
+  }).join(" ");
+  el("path", { d: d, fill: "none", stroke: "var(--signal)",
+               "stroke-width": 2, "stroke-linejoin": "round",
+               "stroke-linecap": "round" });
+
+  // --- 谐波峰值直接标注（不用图例：单序列） ---
+  var peaks = [
+    { f: 23.62, db: -8.31, label: "23.4" },
+    { f: 46.51, db: -12.27, label: "46.9" },
+    { f: 70.13, db: -0.80, label: "70.1" },
+    { f: 93.75, db: -5.17, label: "93.8" },
+    { f: 116.82, db: -2.45, label: "116.8" }
+  ];
+  peaks.forEach(function (p) {
+    el("circle", { cx: x(p.f), cy: y(p.db), r: 4.5,
+                   fill: "var(--alarm)", stroke: "var(--surface)",
+                   "stroke-width": 2 });
+    el("text", { x: x(p.f), y: y(p.db) - 11, "text-anchor": "middle",
+                 "font-family": mono, "font-size": 10.5, "font-weight": 600,
+                 fill: "var(--alarm)" }, p.label);
+  });
+
+  // --- 悬停读数 ---
+  var cross = el("line", { x1: 0, x2: 0, y1: M.t, y2: y(DBMIN),
+                           stroke: "var(--ink-3)", "stroke-width": 1,
+                           opacity: 0 });
+  var dot = el("circle", { cx: 0, cy: 0, r: 3.5, fill: "var(--ink)",
+                           stroke: "var(--surface)", "stroke-width": 2,
+                           opacity: 0 });
+  var hit = el("rect", { x: M.l, y: M.t, width: pw, height: ph,
+                         fill: "transparent" });
+
+  var DEFAULT_TEXT = "把指针移到图上可读取数值";
+
+  function move(evt) {
+    var r = svg.getBoundingClientRect();
+    var cx = (evt.clientX - r.left) * (W / r.width);
+    var f = ((cx - M.l) / pw) * FMAX;
+    if (f < 0 || f > FMAX) { return; }
+    var best = pts[0], bd = Infinity;
+    for (var i = 0; i < pts.length; i++) {
+      var dd = Math.abs(pts[i].f - f);
+      if (dd < bd) { bd = dd; best = pts[i]; }
+    }
+    cross.setAttribute("x1", x(best.f));
+    cross.setAttribute("x2", x(best.f));
+    cross.setAttribute("opacity", 0.5);
+    dot.setAttribute("cx", x(best.f));
+    dot.setAttribute("cy", y(best.db));
+    dot.setAttribute("opacity", 1);
+    readout.innerHTML = "<b>" + best.f.toFixed(2) + " Hz</b> &nbsp; " +
+                        best.db.toFixed(2) + " dB（相对峰值）";
+  }
+
+  function leave() {
+    cross.setAttribute("opacity", 0);
+    dot.setAttribute("opacity", 0);
+    readout.textContent = DEFAULT_TEXT;
+  }
+
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerleave", leave);
+}());
+</script>

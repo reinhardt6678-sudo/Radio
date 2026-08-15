@@ -390,6 +390,22 @@
         }
         .stat-row .stat-label { color: var(--text-dim); }
         .stat-row .stat-val { font-family: var(--mono); font-weight: 600; }
+        .stat-val.warn { color: var(--yellow); }
+        .stat-val.ok { color: var(--green); }
+
+        /* 静噪告警 (阈值压在底噪以下 = 永远不会出信号记录) */
+        .sq-warning {
+            display: none; margin-bottom: 10px; padding: 8px 10px;
+            border: 1px solid rgba(251,191,36,0.35); border-left-width: 3px;
+            border-radius: 4px; background: rgba(251,191,36,0.08);
+            color: var(--yellow); font-size: 11px; line-height: 1.5;
+        }
+        .sq-warning.visible { display: block; }
+        .sq-mode-row {
+            display: flex; align-items: center; gap: 7px;
+            cursor: pointer; text-transform: none; letter-spacing: 0;
+        }
+        .sq-mode-row input { width: 13px; height: 13px; cursor: pointer; }
 
         .bar-row { margin-bottom: 8px; }
         .bar-row .bar-head {
@@ -557,23 +573,39 @@
             <!-- Squelch -->
             <div class="control-section">
                 <h3>Squelch <span class="hint" id="sqState">--</span></h3>
+                <div class="sq-warning" id="sqWarning"></div>
+                <div class="form-group">
+                    <label class="sq-mode-row">
+                        <input type="checkbox" id="sqAdaptive" onchange="onSquelchModeChange()">
+                        <span>自适应 (跟随实测底噪)</span>
+                    </label>
+                    <div class="hint" id="sqModeHint">阈值 = 底噪 +6 dB / +3 dB，换节点换频率都不用重调</div>
+                </div>
                 <div class="form-group">
                     <label>开启阈值 <span class="val" id="sqOpenVal">0.100</span></label>
-                    <input type="range" id="sqOpen" min="0.005" max="0.5" step="0.005" value="0.1"
+                    <input type="range" id="sqOpen" min="0.001" max="0.5" step="0.001" value="0.1"
                            oninput="onSquelchSlide()">
                 </div>
                 <div class="form-group">
                     <label>关闭阈值 <span class="val" id="sqCloseVal">0.085</span></label>
-                    <input type="range" id="sqClose" min="0.004" max="0.5" step="0.005" value="0.085"
+                    <input type="range" id="sqClose" min="0.001" max="0.5" step="0.001" value="0.085"
                            oninput="onSquelchSlide()">
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">实测底噪 (RMS)</span>
                     <span class="stat-val" id="sqFloor">--</span>
                 </div>
-                <div class="stat-row" style="margin-bottom:8px">
-                    <span class="stat-label">建议阈值 (底噪+6dB)</span>
+                <div class="stat-row">
+                    <span class="stat-label">建议阈值 (底噪 +6/+3 dB)</span>
                     <span class="stat-val" id="sqSuggest">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">生效阈值</span>
+                    <span class="stat-val" id="sqEffective">--</span>
+                </div>
+                <div class="stat-row" style="margin-bottom:8px">
+                    <span class="stat-label">静噪状态</span>
+                    <span class="stat-val" id="sqOpenState">--</span>
                 </div>
                 <div class="btn-row">
                     <button class="btn btn-secondary btn-sm" onclick="applyNoiseFloor()">按底噪设定</button>
@@ -733,6 +765,7 @@
 
         let squelchOpen = 0.10;
         let squelchClose = 0.085;
+        let squelchMode = 'absolute';
         let rmsNoiseFloor = 0;
         let passband = [300, 3000];
         let specFMax = 4000;
@@ -835,6 +868,10 @@
                     if (data.spectrum_f_max) specFMax = data.spectrum_f_max;
                     if (data.rms_history && data.rms_history.length) rmsData = data.rms_history.slice(-MAX_RMS_POINTS);
                     syncSquelchInputs();
+                    if (data.squelch) {
+                        updateFloorReadout(data.squelch);
+                        updateSquelchState(data.squelch);
+                    }
                     if (data.monitoring) {
                         monitoring = true;
                         currentMode = data.mode || 'USB';
@@ -872,6 +909,12 @@
                     squelchOpen = data.open_threshold;
                     squelchClose = data.close_threshold;
                     syncSquelchInputs();
+                    updateSquelchState({
+                        mode: data.mode,
+                        effective_open: data.effective_open,
+                        effective_close: data.effective_close,
+                    });
+                    if (data.warning) addLogEntry('静噪', data.warning, 'yellow');
                     drawRmsChart();
                     break;
 
@@ -941,7 +984,18 @@
             if (data.rms_noise_floor != null && data.rms_noise_floor > 0) {
                 rmsNoiseFloor = data.rms_noise_floor;
                 document.getElementById('mRmsFloor').textContent = `底噪 ${rmsNoiseFloor.toFixed(4)}`;
+                document.getElementById('sqFloor').textContent = rmsNoiseFloor.toFixed(4);
             }
+
+            // 生效阈值 / 静噪开关 / 阈值低于底噪的告警
+            updateSquelchState({
+                mode: data.squelch_mode,
+                effective_open: data.effective_open,
+                effective_close: data.effective_close,
+                is_open: data.signal_active,
+                threshold_below_floor: data.threshold_below_floor,
+                rms_noise_floor: data.rms_noise_floor,
+            });
 
             document.getElementById('mSignals').textContent = data.total_signals || 0;
 
@@ -1563,6 +1617,66 @@
             document.getElementById('sqCloseVal').textContent = Number(squelchClose).toFixed(3);
         }
 
+        // 自适应模式下阈值由后端按底噪算，滑块只在固定模式下有意义
+        function onSquelchModeChange() {
+            const adaptive = document.getElementById('sqAdaptive').checked;
+            squelchMode = adaptive ? 'adaptive' : 'absolute';
+            document.getElementById('sqOpen').disabled = adaptive;
+            document.getElementById('sqClose').disabled = adaptive;
+            document.getElementById('sqModeHint').textContent = adaptive
+                ? '阈值 = 底噪 +6 dB / +3 dB，换节点换频率都不用重调'
+                : '固定阈值: 一定要高于实测底噪，否则静噪会一直开着';
+            document.getElementById('sqState').textContent = '未应用';
+        }
+
+        // 阈值低于底噪 = 静噪打开后关不掉 = 一整天一条记录都不会有。
+        // 这是最容易踩、又最不容易看出来的一种配置错误，必须摆在面上。
+        function updateSquelchWarning(state) {
+            // 状态里没带这个字段就别动告警框，避免部分更新把它闪掉
+            if (!state || state.threshold_below_floor === undefined) return;
+            const box = document.getElementById('sqWarning');
+            if (!state.threshold_below_floor) {
+                box.classList.remove('visible');
+                return;
+            }
+            const suggest = state.suggested_open
+                ? `建议 ${state.suggested_open.toFixed(3)} / ${state.suggested_close.toFixed(3)}，或勾选"自适应"`
+                : '建议勾选"自适应"';
+            box.innerHTML = `⚠ 关闭阈值 ${Number(state.effective_close).toFixed(4)} 不高于实测底噪 `
+                + `${Number(state.rms_noise_floor).toFixed(4)}：静噪会一直开着、永远不关，`
+                + `信号数会一直停在 0。${suggest}`;
+            box.classList.add('visible');
+        }
+
+        function updateSquelchState(state) {
+            if (!state) return;
+            const sqState = document.getElementById('sqState');
+            // 用户改了还没点"应用"时，不要用服务端状态盖掉他正在编辑的选择
+            if (state.mode && sqState.textContent !== '未应用') {
+                squelchMode = state.mode;
+                const adaptive = state.mode === 'adaptive';
+                const box = document.getElementById('sqAdaptive');
+                if (box.checked !== adaptive) {
+                    box.checked = adaptive;
+                    onSquelchModeChange();
+                    sqState.textContent = '';
+                }
+            }
+            if (state.effective_open != null) {
+                document.getElementById('sqEffective').textContent =
+                    `${Number(state.effective_open).toFixed(3)} / ${Number(state.effective_close).toFixed(3)}`;
+                // 图表上的静噪线按真正生效的阈值画
+                squelchOpen = state.effective_open;
+                squelchClose = state.effective_close;
+            }
+            if (state.is_open != null) {
+                const el = document.getElementById('sqOpenState');
+                el.textContent = state.is_open ? '开 (录制中)' : '关';
+                el.className = 'stat-val ' + (state.is_open ? 'ok' : '');
+            }
+            updateSquelchWarning(state);
+        }
+
         function onSquelchSlide() {
             const open = parseFloat(document.getElementById('sqOpen').value);
             let close = parseFloat(document.getElementById('sqClose').value);
@@ -1582,6 +1696,7 @@
                 squelchClose = s.close_threshold;
                 syncSquelchInputs();
                 updateFloorReadout(s);
+                updateSquelchState(s);
                 document.getElementById('sqState').textContent = '';
             } catch (e) { /* 页面仍可用 */ }
         }
@@ -1589,7 +1704,9 @@
         async function refreshSquelchFloor() {
             if (!monitoring) return;
             try {
-                updateFloorReadout(await (await fetch('/api/squelch')).json());
+                const s = await (await fetch('/api/squelch')).json();
+                updateFloorReadout(s);
+                updateSquelchState(s);
             } catch (e) { /* 忽略 */ }
         }
 
@@ -1606,27 +1723,42 @@
 
         function applyNoiseFloor() {
             if (!rmsNoiseFloor) { showToast('还没测到底噪，先跑一会监听', 'error'); return; }
+            // 底噪 +6 dB / +3 dB，和后端 suggested_* 同一套口径
+            document.getElementById('sqAdaptive').checked = false;
+            onSquelchModeChange();
             document.getElementById('sqOpen').value = (rmsNoiseFloor * 2).toFixed(3);
-            document.getElementById('sqClose').value = (rmsNoiseFloor * 1.7).toFixed(3);
+            document.getElementById('sqClose').value = (rmsNoiseFloor * 1.413).toFixed(3);
             onSquelchSlide();
             applySquelch();
         }
 
         async function applySquelch() {
+            const adaptive = document.getElementById('sqAdaptive').checked;
             const open = parseFloat(document.getElementById('sqOpen').value);
             const close = parseFloat(document.getElementById('sqClose').value);
             try {
                 const resp = await fetch('/api/squelch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ open_threshold: open, close_threshold: close }),
+                    body: JSON.stringify({
+                        mode: adaptive ? 'adaptive' : 'absolute',
+                        open_threshold: open,
+                        close_threshold: close,
+                    }),
                 });
                 const data = await resp.json();
                 if (data.error) { showToast(data.error, 'error'); return; }
+                squelchMode = adaptive ? 'adaptive' : 'absolute';
                 squelchOpen = open;
                 squelchClose = close;
                 document.getElementById('sqState').textContent = '已应用';
-                showToast('静噪阈值已生效', 'ok');
+                if (data.warning) {
+                    showToast(data.warning, 'error');
+                    addLogEntry('静噪', data.warning, 'yellow');
+                } else {
+                    showToast(adaptive ? '已切换到自适应静噪' : '静噪阈值已生效', 'ok');
+                }
+                refreshSquelchFloor();
                 drawRmsChart();
             } catch (e) {
                 showToast('设置失败: ' + e.message, 'error');

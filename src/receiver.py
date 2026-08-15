@@ -320,9 +320,15 @@ class SignalReceiver:
                     status = squelch.get_status()
                     # 带上音频帧数: RMS 恒为 0 且帧数不涨 = 根本没有音频进来，
                     # 和"有音频但没有信号"是两回事，日志里必须能分得开。
+                    # 再带上底噪和生效阈值: "阈值压在底噪以下 → 静噪一直开着 →
+                    # 一条记录都不出"这种情况，光看 signals=0 是看不出来的。
                     self._report_status(
                         f"[MONITORING] {freq.freq_khz} kHz | "
                         f"RMS={status['current_rms']:.4f} | "
+                        f"底噪={status['noise_floor']:.4f} | "
+                        f"阈值={status['effective_open']:.4f}/"
+                        f"{status['effective_close']:.4f} | "
+                        f"静噪={'开' if status['is_open'] else '关'} | "
                         f"signals={self._total_signals} | "
                         f"frames={client.audio_frames} "
                         f"(dropped={client.dropped_frames}) | "
@@ -347,7 +353,9 @@ class SignalReceiver:
                         )
                     break
 
-            # 停止并清理
+            # 停止并清理。
+            # 先让静噪正常收尾，正在录的那段信号才会入库
+            squelch.force_close("monitor-stop")
             await client.stop_audio_stream()
             if recorder.is_recording:
                 recorder.stop_recording()
@@ -425,6 +433,8 @@ class SignalReceiver:
 
                 await client.start_audio_stream(process_audio)
                 await asyncio.sleep(dwell)
+                # 切频率前先收尾，否则这一段的信号记录会被直接丢掉
+                squelch.force_close("frequency-switch")
                 await client.stop_audio_stream()
 
                 if recorder.is_recording:

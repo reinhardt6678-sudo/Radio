@@ -234,6 +234,60 @@ class TestSquelchApi:
 
         assert with_client(env["server"], scenario) == 400
 
+    def test_get_squelch_reports_effective_state(self, env):
+        async def scenario(c):
+            return await (await c.get("/api/squelch")).json()
+
+        data = with_client(env["server"], scenario)
+        for key in ("mode", "effective_open", "effective_close",
+                    "threshold_below_floor", "is_open", "rms_noise_floor"):
+            assert key in data
+
+    def test_switch_to_adaptive_mode(self, env):
+        from src.squelch import SquelchDetector, MODE_ADAPTIVE
+        server = env["server"]
+        server._squelch = SquelchDetector(open_threshold=0.1, close_threshold=0.08)
+
+        async def scenario(c):
+            return await (await c.post("/api/squelch",
+                                       json={"mode": "adaptive"})).json()
+
+        data = with_client(server, scenario)
+        assert data["status"] == "ok"
+        assert server._squelch.mode == MODE_ADAPTIVE
+        assert env["config"]["squelch"]["mode"] == "adaptive"
+
+    def test_rejects_unknown_mode(self, env):
+        async def scenario(c):
+            return (await c.post("/api/squelch",
+                                 json={"mode": "magic"})).status
+
+        assert with_client(env["server"], scenario) == 400
+
+    def test_warns_when_threshold_below_measured_floor(self, env):
+        """
+        回归: 阈值压在底噪以下时静噪永远关不掉，
+        信号数会一整天停在 0 —— 设置接口必须把这件事说出来。
+        """
+        import numpy as np
+        from src.squelch import SquelchDetector
+
+        server = env["server"]
+        det = SquelchDetector(open_threshold=0.010, close_threshold=0.004,
+                              floor_min_blocks=20)
+        det.FLOOR_RECALC_INTERVAL = 0.0
+        for _ in range(40):
+            det.process(np.full(64, 0.09, dtype=np.float32))
+        server._squelch = det
+
+        async def scenario(c):
+            return await (await c.post("/api/squelch", json={
+                "open_threshold": 0.010, "close_threshold": 0.004})).json()
+
+        data = with_client(server, scenario)
+        assert data["status"] == "ok"
+        assert data["warning"] and "底噪" in data["warning"]
+
     def test_applies_to_running_detector(self, env):
         from src.squelch import SquelchDetector
         server = env["server"]

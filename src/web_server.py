@@ -23,7 +23,7 @@ from aiohttp import web
 
 from .kiwi_client import KiwiSDRClient
 from .node_manager import NodeManager
-from .squelch import SquelchDetector
+from .squelch import SquelchDetector, MODE_ABSOLUTE, VALID_MODES, db_to_ratio
 from .recorder import AudioRecorder
 from .analyzer import SignalAnalyzer
 from .modes import audio_passband, normalize_mode
@@ -40,10 +40,6 @@ class WebMonitorServer:
     # 瀑布图的频率格数与显示上限
     SPECTRUM_BINS = 128
     SPECTRUM_F_MAX = 4000.0
-    # 噪声基底统计窗口 (RMS 块数, 约 4 分钟)
-    RMS_FLOOR_WINDOW = 6000
-    # 噪声基底取第几百分位
-    RMS_FLOOR_PERCENTILE = 20.0
 
     def __init__(self, config: dict, db: Database, freq_data: dict):
         self.config = config
@@ -83,7 +79,8 @@ class WebMonitorServer:
         self._last_spectrum: Dict = {}
         self._live_snr_db = 0.0
         self._live_noise_floor_db = -120.0
-        self._rms_floor_window: deque = deque(maxlen=self.RMS_FLOOR_WINDOW)
+        # 底噪由 SquelchDetector 统一维护 (监听中实时同步过来)，
+        # 这里只保留最后一次的值，供停止监听后继续显示
         self._rms_noise_floor = 0.0
         self._dropped_frames = 0
 
@@ -172,15 +169,16 @@ class WebMonitorServer:
         logger.info(f"WebSocket 客户端连接 (共 {len(self._ws_clients)})")
 
         # 发送初始状态
-        sq_cfg = self.config.get("squelch", {})
+        squelch_state = self._squelch_state()
         await ws.send_json({
             "type": "init",
             "monitoring": self._monitoring,
             "frequency": self._current_freq,
             "mode": self._current_mode,
             "node": self._current_node.get("name", ""),
-            "squelch_threshold": sq_cfg.get("open_threshold", 0.15),
-            "squelch_close": sq_cfg.get("close_threshold", 0.085),
+            "squelch_threshold": squelch_state["open_threshold"],
+            "squelch_close": squelch_state["close_threshold"],
+            "squelch": squelch_state,
             "passband": list(audio_passband(self._current_mode)),
             "spectrum_bins": self.SPECTRUM_BINS,
             "spectrum_f_max": self.SPECTRUM_F_MAX,
@@ -224,7 +222,6 @@ class WebMonitorServer:
     async def _api_status(self, request: web.Request) -> web.Response:
         """获取当前系统状态。"""
         elapsed = time.time() - self._monitor_start_time if self._monitoring else 0
-        sq_cfg = self.config.get("squelch", {})
         return web.json_response({
             "monitoring": self._monitoring,
             "frequency_khz": self._current_freq,
@@ -245,10 +242,7 @@ class WebMonitorServer:
             "rms_noise_floor": round(self._rms_noise_floor, 5),
             "dropped_frames": self._dropped_frames,
             "passband": list(audio_passband(self._current_mode)),
-            "squelch": {
-                "open_threshold": sq_cfg.get("open_threshold", 0.15),
-                "close_threshold": sq_cfg.get("close_threshold", 0.085),
-            },
+            "squelch": self._squelch_state(),
             "spectrum": self._last_spectrum,
         })
 
@@ -480,20 +474,62 @@ class WebMonitorServer:
 
     # ==================== 静噪阈值 ====================
 
-    async def _api_get_squelch(self, request: web.Request) -> web.Response:
-        """当前静噪设置与实测噪声基底。"""
+    def _squelch_state(self) -> dict:
+        """
+        静噪配置 + 实测底噪 + 当前生效阈值。
+
+        页面、/api/status、/api/squelch 和 WebSocket 推送共用一份，
+        避免几个地方各算各的又对不上。
+        """
         sq_cfg = self.config.get("squelch", {})
-        return web.json_response({
+        det = self._squelch
+
+        state = {
+            "mode": sq_cfg.get("mode", MODE_ABSOLUTE),
             "open_threshold": sq_cfg.get("open_threshold", 0.15),
             "close_threshold": sq_cfg.get("close_threshold", 0.085),
             "tail_time": sq_cfg.get("tail_time", 3.0),
             "rms_noise_floor": round(self._rms_noise_floor, 5),
-            "current_rms": round(self._current_rms, 5),
-            "samples": len(self._rms_floor_window),
-            # 建议值: 噪声基底 + 6 dB
-            "suggested_open": round(self._rms_noise_floor * 2.0, 5),
-            "suggested_close": round(self._rms_noise_floor * 1.7, 5),
-        })
+            "floor_samples": 0,
+            "warming_up": False,
+            "is_open": False,
+            "threshold_below_floor": False,
+            "stuck_open": False,
+            "forced_closes": 0,
+        }
+
+        if det is not None:
+            suggested_open, suggested_close = det.suggested_thresholds()
+            state.update({
+                "mode": det.mode,
+                "effective_open": round(det.effective_open_threshold, 5),
+                "effective_close": round(det.effective_close_threshold, 5),
+                "floor_samples": det.floor_sample_count,
+                "warming_up": det.warming_up,
+                "is_open": det.is_open,
+                "threshold_below_floor": det.threshold_below_floor,
+                "stuck_open": det.stuck_open,
+                "forced_closes": det.forced_closes,
+            })
+        else:
+            # 还没开始监听: 生效阈值就是配置值，建议值按最后一次测到的底噪算
+            state["effective_open"] = state["open_threshold"]
+            state["effective_close"] = state["close_threshold"]
+            suggested_open = round(
+                self._rms_noise_floor * db_to_ratio(sq_cfg.get("open_margin_db", 6.0)), 5)
+            suggested_close = round(
+                self._rms_noise_floor * db_to_ratio(sq_cfg.get("close_margin_db", 3.0)), 5)
+
+        state["suggested_open"] = suggested_open
+        state["suggested_close"] = suggested_close
+        return state
+
+    async def _api_get_squelch(self, request: web.Request) -> web.Response:
+        """当前静噪设置与实测噪声基底。"""
+        state = self._squelch_state()
+        state["current_rms"] = round(self._current_rms, 5)
+        state["samples"] = state["floor_samples"]
+        return web.json_response(state)
 
     async def _api_set_squelch(self, request: web.Request) -> web.Response:
         """
@@ -510,6 +546,24 @@ class WebMonitorServer:
         updated = {}
 
         try:
+            if "mode" in data:
+                value = str(data["mode"]).lower()
+                if value not in VALID_MODES:
+                    return web.json_response(
+                        {"error": f"静噪模式只能是 {' / '.join(VALID_MODES)}"}, status=400)
+                updated["mode"] = value
+            if "open_margin_db" in data:
+                value = float(data["open_margin_db"])
+                if not (0.0 < value <= 40.0):
+                    return web.json_response({"error": "打开余量需在 0-40 dB 之间"},
+                                             status=400)
+                updated["open_margin_db"] = value
+            if "close_margin_db" in data:
+                value = float(data["close_margin_db"])
+                if not (0.0 < value <= 40.0):
+                    return web.json_response({"error": "关闭余量需在 0-40 dB 之间"},
+                                             status=400)
+                updated["close_margin_db"] = value
             if "open_threshold" in data:
                 value = float(data["open_threshold"])
                 if not (0.0 < value <= 1.0):
@@ -543,17 +597,40 @@ class WebMonitorServer:
         if self._squelch:
             self._squelch.open_threshold = open_th
             self._squelch.close_threshold = close_th
+            if "mode" in updated:
+                self._squelch.mode = updated["mode"]
+            if "open_margin_db" in updated:
+                self._squelch.open_margin_db = updated["open_margin_db"]
+            if "close_margin_db" in updated:
+                self._squelch.close_margin_db = updated["close_margin_db"]
             if "tail_time" in updated:
                 self._squelch.tail_time = updated["tail_time"]
 
-        logger.info(f"静噪阈值已更新: {updated}")
+        # 关闭阈值压在底噪以下时静噪永远关不掉 —— 值照样生效，
+        # 但必须明确告诉页面，别让它安安静静地跑一整天不出记录
+        state = self._squelch_state()
+        warning = None
+        if state["threshold_below_floor"]:
+            warning = (
+                f"关闭阈值 {state['effective_close']:.4f} 不高于实测底噪 "
+                f"{state['rms_noise_floor']:.4f}: 静噪会一直开着，不会产生信号记录。"
+                f"建议 {state['suggested_open']:.4f} / {state['suggested_close']:.4f}，"
+                f"或改用自适应模式"
+            )
+            logger.warning(warning)
+
+        logger.info(f"静噪设置已更新: {updated}")
         await self._broadcast_ws({
             "type": "squelch_updated",
             "open_threshold": open_th,
             "close_threshold": close_th,
             "tail_time": sq_cfg.get("tail_time", 3.0),
+            "mode": state["mode"],
+            "effective_open": state["effective_open"],
+            "effective_close": state["effective_close"],
+            "warning": warning,
         })
-        return web.json_response({"status": "ok", **sq_cfg})
+        return web.json_response({"status": "ok", "warning": warning, **sq_cfg})
 
     async def _api_start_monitor(self, request: web.Request) -> web.Response:
         """开始监听。"""
@@ -626,8 +703,8 @@ class WebMonitorServer:
         self._spectrum_buffer = []
         self._spectrum_samples = 0
         self._last_spectrum = {}
-        self._rms_floor_window.clear()
         self._rms_noise_floor = 0.0
+        self._signal_active = False
         self._dropped_frames = 0
         self._recent_signals.clear()
 
@@ -793,6 +870,9 @@ class WebMonitorServer:
                     self._current_rms = float(np.sqrt(np.mean(samples ** 2)))
                     self._current_smeter = smeter
                     self._squelch.process(samples)
+                    # 以检测器状态为准，不靠回调来维持这个标志:
+                    # 强制收尾/断线重连时回调不一定成对出现
+                    self._signal_active = self._squelch.is_open
 
                     self._rms_history.append(round(self._current_rms, 5))
                     if len(self._rms_history) > 500:
@@ -801,14 +881,11 @@ class WebMonitorServer:
                     if len(self._smeter_history) > 500:
                         self._smeter_history = self._smeter_history[-500:]
 
-                    # 滚动噪声基底: 静噪关闭时的 RMS 低分位数。
-                    # 有了它就不用再靠"试出来"的固定阈值 —— CHANGELOG 里
-                    # 0.65 → 0.15 → 0.10 三次手调调的其实是节点的 AGC。
-                    if not self._signal_active:
-                        self._rms_floor_window.append(self._current_rms)
-                    if len(self._rms_floor_window) >= 20:
-                        self._rms_noise_floor = float(np.percentile(
-                            self._rms_floor_window, self.RMS_FLOOR_PERCENTILE))
+                    # 滚动噪声基底由检测器维护 (静噪开着的时候也继续统计)。
+                    # 这里原来只在静噪关闭时累积: 阈值一旦低于底噪，静噪就
+                    # 一直开着，底噪被冻结在监听刚起步那几秒的数值上，
+                    # "按底噪设定"照着这个死值只会把阈值调得更低。
+                    self._rms_noise_floor = self._squelch.noise_floor
 
                     if self._kiwi_client:
                         self._dropped_frames = self._kiwi_client.dropped_frames
@@ -852,6 +929,13 @@ class WebMonitorServer:
                             "total_signals": self._total_signals,
                             "elapsed": round(time.time() - self._monitor_start_time, 0),
                             "reconnects": self._reconnect_count,
+                            "squelch_mode": self._squelch.mode,
+                            "effective_open": round(
+                                self._squelch.effective_open_threshold, 5),
+                            "effective_close": round(
+                                self._squelch.effective_close_threshold, 5),
+                            "threshold_below_floor": self._squelch.threshold_below_floor,
+                            "signal_seconds": round(self._squelch.signal_duration, 0),
                         })
 
                 await self._kiwi_client.start_audio_stream(process_audio)
@@ -860,7 +944,11 @@ class WebMonitorServer:
                 while self._monitoring and self._kiwi_client.connected:
                     await asyncio.sleep(0.5)
 
-                # 清理当前连接
+                # 清理当前连接。
+                # 先把正在录的那段信号收尾: 直接停录音器的话，WAV 留在磁盘上
+                # 却没有任何数据库记录 —— 长时间监听里每次重连都会丢一段。
+                self._close_open_signal(
+                    "monitor-stop" if not self._monitoring else "disconnect")
                 if self._kiwi_client:
                     await self._kiwi_client.stop_audio_stream()
                     await self._kiwi_client.disconnect()
@@ -890,6 +978,10 @@ class WebMonitorServer:
                 await self._broadcast_ws({"type": "error", "message": str(e)})
 
                 # 清理
+                try:
+                    self._close_open_signal("error")
+                except Exception:
+                    pass
                 if self._kiwi_client:
                     try:
                         await self._kiwi_client.stop_audio_stream()
@@ -930,6 +1022,21 @@ class WebMonitorServer:
             f"Signals: {self._total_signals}, Reconnects: {self._reconnect_count}"
         )
         await self._broadcast_ws({"type": "monitor_stopped", "total_reconnects": self._reconnect_count})
+
+    def _close_open_signal(self, reason: str):
+        """
+        断线/停止/异常时，把正在进行的信号正常收尾。
+
+        走 SquelchDetector.force_close() 而不是直接停录音器，
+        这样 on_close 回调照常跑: 录音落库、分析入库、页面收到事件。
+        """
+        if self._squelch and self._squelch.is_open:
+            logger.info(f"监听中断，强制结束当前信号 (reason={reason})")
+            try:
+                self._squelch.force_close(reason)
+            except Exception as e:
+                logger.error(f"强制结束信号失败: {e}", exc_info=True)
+        self._signal_active = False
 
     async def _find_alternative_node(self, current_node: dict) -> Optional[dict]:
         """

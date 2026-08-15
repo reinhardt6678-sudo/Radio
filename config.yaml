@@ -78,28 +78,51 @@ receiver:
   bandwidth: 6000
 
 # --- 静噪 (VOX) 设置 ---
-# 实测: KiwiSDR 在 11175 kHz USB 的底噪 RMS 约 0.04~0.05
-# EAM 信号峰值 RMS 通常在 0.12~0.23 范围
-# 2026-06-09: 经 EAM.watch 录音对比，0.15 阈值漏掉 75% 信号，降至 0.10
+# 节点开着 AGC (见 kiwi_client 的 SET agc=1)，底噪会被自动放大到一个
+# 差不多恒定的电平: 同一个信号在不同节点/不同时段的绝对 RMS 能差好几倍。
+# CHANGELOG 里 0.65 -> 0.15 -> 0.10 三次手调，调的其实都是节点的 AGC。
 #
-# !! 这里的阈值是"绝对电平"，而节点开着 AGC (见 kiwi_client 的 SET agc=1)，
-#    同一个信号在不同节点上的 RMS 可以差好几倍。0.65 -> 0.15 -> 0.10 三次
-#    手调调的其实都是节点的 AGC，不是信号本身。而且 0.10 是拿 EAM.watch 的
-#    录音(另一台接收机、另一套电平)按 1024 点窗口回放算出来的，实时检测器
-#    是按收到的每个 KiwiSDR 音频帧(512 点)算 RMS —— 两边口径都不一样，
-#    这个数字并没有在自己的接收链路上校准过。
-#    换节点/换频率后请先量一次再决定用多少:
-#        python diagnose_rms.py -f 11175          # 单个节点
-#        python diagnose_rms.py -f 11175 --all-nodes
-#    Web 界面上也有实测底噪和"按底噪设定"(底噪 +6 dB)。
+# 所以默认用 adaptive: 阈值 = 实测底噪 + N dB，跟着底噪自己走。
+# 换节点、换频率、白天晚上的噪声变化都不用再手调。
+#
+# 想用固定阈值就把 mode 改成 absolute，但一定要先量一次底噪再定值 ——
+# 阈值只要低于底噪，静噪打开后就再也关不掉，界面上会一直是 0 个信号:
+#     python diagnose_rms.py -f 11175          # 单个节点
+#     python diagnose_rms.py -f 11175 --all-nodes
+# Web 界面上也有实测底噪和"按底噪设定"。
 squelch:
+  # absolute = 固定阈值 (下面的 open/close_threshold)
+  # adaptive = 底噪 + N dB (下面的 open/close_margin_db)
+  mode: adaptive
+
+  # --- adaptive 模式参数 ---
+  # 打开阈值高于实测底噪多少 dB (6 dB = 底噪的 2 倍)
+  open_margin_db: 6.0
+  # 关闭阈值高于实测底噪多少 dB (3 dB = 底噪的 1.41 倍，留滞后)
+  close_margin_db: 3.0
+  # 打开阈值的绝对下限: 链路彻底静音(全 0)时不要把数字静音当成信号
+  min_open_threshold: 0.005
+  # 底噪统计窗口 (秒) 和取值百分位。
+  # 窗口开够长 + 取低百分位，即使中间有一段几分钟的连续通联，
+  # 窗口里绝大部分仍然是底噪，估计值不会被信号抬起来。
+  floor_window_seconds: 600
+  floor_percentile: 10
+
+  # --- absolute 模式参数 ---
   # 静噪开启阈值 (RMS 能量, 0-1 范围)
-  # EAM.watch 对比: 0.10 检测率 100%, 0.15 仅 25%
   open_threshold: 0.10
   # 静噪关闭阈值 (约 open 的 85%，形成滞后防止频繁切换)
   close_threshold: 0.085
+
   # 信号消失后继续录制的延迟 (秒), 防止截断信号尾部
   tail_time: 3.0
+  # 静噪最长连续打开时间 (秒)。到点强制收尾:
+  #   - 长通联按这个长度分段入库
+  #   - 阈值配错(低于底噪)导致静噪关不掉时，不会一整天憋着不出任何记录
+  # 不写则自动按 recording 推导 (max_duration - pre_roll - 5)，保证静噪比
+  # 录音器先收尾 —— 反过来录音器会自己切一刀，那个文件不会有数据库记录。
+  # 显式写 0 = 不限制 (不建议: 静噪一旦卡开就又回到"一整天 0 条记录")。
+  # max_open_seconds: 293
   # 分析窗口大小 (采样点数)
   # 注意: 只有 compare_eam.py 的离线回放用它。实时的 SquelchDetector 是按
   # 收到的每个音频帧算 RMS(KiwiSDR 一帧 512 点 = 42.7 ms)，不读这个值。

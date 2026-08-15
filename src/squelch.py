@@ -3,15 +3,33 @@ squelch.py - 静噪检测 / 信号活动检测 (VOX)
 
 通过分析音频流的 RMS 能量来检测信号活动，
 在信号出现时触发录制，在信号消失后延迟关闭。
+
+两种取阈方式:
+  absolute  固定 RMS 阈值 (老行为)。节点开着 AGC 时，同一个信号在不同
+            节点/不同时段的绝对电平能差好几倍，这个值需要人工校准。
+  adaptive  阈值 = 实测底噪 + N dB，跟着底噪自己走，换节点/换频率不用重调。
+
+无论用哪种方式，检测器都持续统计底噪，并且带两层保护:
+  - 关闭阈值低于底噪时告警 (这种配置下静噪打开后永远关不掉)
+  - 静噪连续打开超过 max_open_seconds 时强制收尾，避免一直挂着不出记录
 """
 
 import numpy as np
 import logging
 import time
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Tuple
 from collections import deque
 
 logger = logging.getLogger(__name__)
+
+MODE_ABSOLUTE = "absolute"
+MODE_ADAPTIVE = "adaptive"
+VALID_MODES = (MODE_ABSOLUTE, MODE_ADAPTIVE)
+
+
+def db_to_ratio(db: float) -> float:
+    """dB 差值转幅度比 (RMS 是幅度量, 用 20log10)。"""
+    return float(10.0 ** (db / 20.0))
 
 
 class SquelchDetector:
@@ -22,24 +40,46 @@ class SquelchDetector:
     - 开/关阈值分离（滞后），避免在阈值附近频繁切换
     - 可配置的尾部延迟（tail_time），防止截断信号末尾
     - pre-roll 缓冲区，保留信号开始前的音频
+    - 滚动底噪统计，支持"底噪 + N dB"的自适应阈值
+    - 卡死保护：静噪打开过久时强制收尾并告警
     """
+
+    # 底噪重算间隔 (秒)，不必每块都重算百分位数
+    FLOOR_RECALC_INTERVAL = 0.5
 
     def __init__(self, open_threshold: float = 0.02,
                  close_threshold: float = 0.015,
                  tail_time: float = 3.0,
                  pre_roll_seconds: float = 2.0,
                  sample_rate: int = 12000,
-                 window_size: int = 1024):
+                 window_size: int = 1024,
+                 mode: str = MODE_ABSOLUTE,
+                 open_margin_db: float = 6.0,
+                 close_margin_db: float = 3.0,
+                 min_open_threshold: float = 0.005,
+                 floor_window_seconds: float = 600.0,
+                 floor_percentile: float = 10.0,
+                 floor_min_blocks: int = 50,
+                 max_open_seconds: float = 300.0):
         """
         初始化静噪检测器。
 
         Args:
-            open_threshold: 静噪打开阈值 (RMS, 0-1)
+            open_threshold: 静噪打开阈值 (RMS, 0-1)，mode=absolute 时使用
             close_threshold: 静噪关闭阈值 (RMS, 通常 < open_threshold)
             tail_time: 信号消失后继续录制的秒数
             pre_roll_seconds: 保留信号开始前的音频秒数
             sample_rate: 音频采样率
             window_size: RMS 计算窗口大小（采样点数）
+            mode: absolute (固定阈值) 或 adaptive (底噪 + N dB)
+            open_margin_db: adaptive 模式下打开阈值高于底噪多少 dB
+            close_margin_db: adaptive 模式下关闭阈值高于底噪多少 dB
+            min_open_threshold: adaptive 模式下打开阈值的绝对下限，
+                                防止链路完全静音时把数字静音当成信号
+            floor_window_seconds: 底噪统计窗口长度 (秒)
+            floor_percentile: 底噪取窗口内第几百分位
+            floor_min_blocks: 至少积累多少块才给出底噪
+            max_open_seconds: 静噪最长连续打开时间 (秒)，0 = 不限制
         """
         self.open_threshold = open_threshold
         self.close_threshold = close_threshold
@@ -47,6 +87,15 @@ class SquelchDetector:
         self.pre_roll_seconds = pre_roll_seconds
         self.sample_rate = sample_rate
         self.window_size = window_size
+
+        self.mode = mode if mode in VALID_MODES else MODE_ABSOLUTE
+        self.open_margin_db = open_margin_db
+        self.close_margin_db = close_margin_db
+        self.min_open_threshold = min_open_threshold
+        self.floor_window_seconds = floor_window_seconds
+        self.floor_percentile = floor_percentile
+        self.floor_min_blocks = floor_min_blocks
+        self.max_open_seconds = max_open_seconds
 
         # 状态
         self.is_open = False           # 静噪是否打开（有信号）
@@ -57,6 +106,19 @@ class SquelchDetector:
         self._rms_history: deque = deque(maxlen=100)
         self._current_rms = 0.0
         self._peak_rms = 0.0
+
+        # 滚动底噪统计 (timestamp, rms)。
+        # 注意: 打开和关闭状态都要统计。只在关闭时统计的话，一旦阈值低于
+        # 底噪，静噪会一直开着 —— 底噪就被冻结在监听刚起步那一瞬间的值上，
+        # 之后"按底噪设定"只会照着这个死值把阈值调得更低。
+        self._floor_samples: deque = deque()
+        self._noise_floor = 0.0
+        self._last_floor_calc = 0.0
+
+        # 卡死保护
+        self._forced_closes = 0
+        self._stuck_open = False
+        self._below_floor_warned = False
 
         # Pre-roll 块级缓冲区 (存储完整音频块而非逐样本)
         self._pre_roll_max_samples = int(pre_roll_seconds * sample_rate)
@@ -79,12 +141,30 @@ class SquelchDetector:
         sq_cfg = config.get("squelch", {})
         rec_cfg = config.get("recording", {})
         recv_cfg = config.get("receiver", {})
+
+        # 没显式配就按录音分段推导，并且要比录音器早一点收尾。
+        # 录音器是按"已写入样本数"分段的，pre-roll 先占掉了一段;
+        # 让静噪先收尾，一个 WAV 才刚好对应一条信号记录 ——
+        # 反过来的话录音器会自己切一刀，那个文件不会有任何数据库记录。
+        max_open = sq_cfg.get("max_open_seconds")
+        if max_open is None:
+            max_duration = float(rec_cfg.get("max_duration", 300.0))
+            pre_roll = float(rec_cfg.get("pre_roll", 2.0))
+            max_open = max(30.0, max_duration - pre_roll - 5.0)
+
         return cls(
             open_threshold=sq_cfg.get("open_threshold", 0.02),
             close_threshold=sq_cfg.get("close_threshold", 0.015),
             tail_time=sq_cfg.get("tail_time", 3.0),
             pre_roll_seconds=rec_cfg.get("pre_roll", 2.0),
             sample_rate=recv_cfg.get("sample_rate", 12000),
+            mode=sq_cfg.get("mode", MODE_ABSOLUTE),
+            open_margin_db=sq_cfg.get("open_margin_db", 6.0),
+            close_margin_db=sq_cfg.get("close_margin_db", 3.0),
+            min_open_threshold=sq_cfg.get("min_open_threshold", 0.005),
+            floor_window_seconds=sq_cfg.get("floor_window_seconds", 600.0),
+            floor_percentile=sq_cfg.get("floor_percentile", 10.0),
+            max_open_seconds=max_open,
         )
 
     def set_callbacks(self,
@@ -119,6 +199,10 @@ class SquelchDetector:
         rms = self._compute_rms(samples)
         self._current_rms = rms
         self._rms_history.append(rms)
+        self._update_noise_floor(now, rms)
+
+        open_threshold = self.effective_open_threshold
+        close_threshold = self.effective_close_threshold
 
         if not self.is_open:
             # 当前静噪关闭状态 - 保存到 pre-roll 缓冲区
@@ -130,14 +214,17 @@ class SquelchDetector:
                 removed = self._pre_roll_blocks.popleft()
                 self._pre_roll_total_samples -= len(removed)
 
-            # 检查是否应该打开静噪
-            if rms >= self.open_threshold:
+            # 检查是否应该打开静噪。
+            # adaptive 模式下底噪还没测出来之前不判信号: 这时候退回到一个
+            # 没在本节点校准过的绝对阈值，正是这套系统最容易出问题的地方。
+            # pre-roll 一直在攒，等底噪出来照样能把开头补回去。
+            if not self.warming_up and rms >= open_threshold:
                 self.is_open = True
                 self._signal_start_time = now
                 self._last_above_time = now
                 self._peak_rms = rms
 
-                logger.info(f"[SIGNAL-ON] RMS={rms:.4f} (threshold={self.open_threshold})")
+                logger.info(f"[SIGNAL-ON] RMS={rms:.4f} (threshold={open_threshold:.4f})")
 
                 # 回调: 信号开始，传递 pre-roll 数据
                 if self._on_open:
@@ -152,7 +239,7 @@ class SquelchDetector:
                     self._on_audio(samples)
         else:
             # 当前静噪打开状态 - 有信号
-            if rms >= self.close_threshold:
+            if rms >= close_threshold:
                 self._last_above_time = now
                 self._peak_rms = max(self._peak_rms, rms)
 
@@ -161,32 +248,114 @@ class SquelchDetector:
                 self._on_audio(samples)
 
             # 检查是否应该关闭静噪 (信号消失 + tail_time 已过)
-            if rms < self.close_threshold:
-                elapsed_since_signal = now - self._last_above_time
-                if elapsed_since_signal >= self.tail_time:
-                    self.is_open = False
-                    duration = now - self._signal_start_time
+            closed = False
+            if rms < close_threshold:
+                if (now - self._last_above_time) >= self.tail_time:
+                    self._close(now, reason="signal-end")
+                    closed = True
 
-                    # 计算平均 RMS
-                    avg_rms = float(np.mean(list(self._rms_history)))
-
-                    logger.info(
-                        f"[SIGNAL-OFF] duration={duration:.1f}s, "
-                        f"peak_RMS={self._peak_rms:.4f}, "
-                        f"avg_RMS={avg_rms:.4f}"
-                    )
-
-                    # 回调: 信号结束
-                    if self._on_close:
-                        self._on_close(duration, self._peak_rms, avg_rms)
-
-                    # 重置
-                    self._peak_rms = 0.0
-                    self._rms_history.clear()
-                    self._pre_roll_blocks.clear()
-                    self._pre_roll_total_samples = 0
+            # 卡死保护: 电平一直压在关闭阈值之上时，上面那条永远不成立。
+            # 到点强制收尾，信号才会真正落库 —— 否则录制一直挂着，
+            # 界面上的信号数会永远停在 0。
+            if (not closed and self.max_open_seconds > 0
+                    and (now - self._signal_start_time) >= self.max_open_seconds):
+                self._close(now, reason="max-open")
 
         return self.is_open
+
+    def force_close(self, reason: str = "external") -> bool:
+        """
+        外部强制结束当前信号 (断线、停止监听时调用)。
+
+        不这么做的话，断线瞬间正在录的那段信号会被直接丢掉:
+        录音文件留在磁盘上，但没有任何数据库记录。
+
+        Returns:
+            是否确实关闭了一段正在进行的信号
+        """
+        if not self.is_open:
+            return False
+        self._close(time.time(), reason=reason)
+        return True
+
+    def _close(self, now: float, reason: str):
+        """结束当前信号，触发 on_close 回调并复位状态。"""
+        duration = now - self._signal_start_time
+        avg_rms = (float(np.mean(list(self._rms_history)))
+                   if self._rms_history else 0.0)
+        peak_rms = self._peak_rms
+
+        self.is_open = False
+
+        if reason == "max-open":
+            self._forced_closes += 1
+            # 到点强制收尾时电平还压在关闭阈值上 = 阈值低于当前底噪，
+            # 静噪不是"收到一段长信号"，而是根本关不掉
+            self._stuck_open = self._current_rms >= self.effective_close_threshold
+            if self._stuck_open:
+                logger.warning(
+                    f"[SQUELCH-STUCK] 静噪已连续打开 {duration:.0f}s 且 RMS "
+                    f"{self._current_rms:.4f} 始终不低于关闭阈值 "
+                    f"{self.effective_close_threshold:.4f} (实测底噪 "
+                    f"{self._noise_floor:.4f}) —— 阈值低于底噪，强制收尾。"
+                    f"请把阈值调到底噪之上，或改用 mode: adaptive"
+                )
+            else:
+                logger.info(
+                    f"[SIGNAL-SPLIT] 达到最长连续时间 {self.max_open_seconds:.0f}s，"
+                    f"当前段收尾 (duration={duration:.1f}s)"
+                )
+        else:
+            self._stuck_open = False
+            logger.info(
+                f"[SIGNAL-OFF] duration={duration:.1f}s, "
+                f"peak_RMS={peak_rms:.4f}, "
+                f"avg_RMS={avg_rms:.4f}, reason={reason}"
+            )
+
+        # 回调: 信号结束
+        if self._on_close:
+            self._on_close(duration, peak_rms, avg_rms)
+
+        # 重置
+        self._peak_rms = 0.0
+        self._rms_history.clear()
+        self._pre_roll_blocks.clear()
+        self._pre_roll_total_samples = 0
+
+    def _update_noise_floor(self, now: float, rms: float):
+        """更新滚动底噪 (窗口内的低百分位数)。"""
+        self._floor_samples.append((now, rms))
+        cutoff = now - self.floor_window_seconds
+        while self._floor_samples and self._floor_samples[0][0] < cutoff:
+            self._floor_samples.popleft()
+
+        if len(self._floor_samples) < self.floor_min_blocks:
+            return
+        if (now - self._last_floor_calc) < self.FLOOR_RECALC_INTERVAL:
+            return
+
+        self._last_floor_calc = now
+        self._noise_floor = float(np.percentile(
+            [value for _, value in self._floor_samples], self.floor_percentile))
+        self._warn_if_below_floor()
+
+    def _warn_if_below_floor(self):
+        """关闭阈值低于底噪时告警 (这种配置下静噪打开后就关不掉了)。"""
+        if self.mode != MODE_ABSOLUTE or self._noise_floor <= 0:
+            return
+        if self.close_threshold <= self._noise_floor:
+            if not self._below_floor_warned:
+                logger.warning(
+                    f"关闭阈值 {self.close_threshold:.4f} 不高于实测底噪 "
+                    f"{self._noise_floor:.4f}: 静噪一旦打开就再也关不掉，"
+                    f"信号记录会一直是 0 条。建议 open>="
+                    f"{self._noise_floor * db_to_ratio(self.open_margin_db):.4f}, "
+                    f"close>={self._noise_floor * db_to_ratio(self.close_margin_db):.4f}"
+                )
+                self._below_floor_warned = True
+        else:
+            self._below_floor_warned = False
 
     def _compute_rms(self, samples: np.ndarray) -> float:
         """计算 RMS (Root Mean Square) 能量。"""
@@ -200,11 +369,68 @@ class SquelchDetector:
         return self._current_rms
 
     @property
+    def noise_floor(self) -> float:
+        """实测底噪 (窗口内低百分位 RMS)，还没测够时为 0。"""
+        return self._noise_floor
+
+    @property
+    def floor_sample_count(self) -> int:
+        """底噪统计窗口内的样本块数。"""
+        return len(self._floor_samples)
+
+    @property
+    def warming_up(self) -> bool:
+        """adaptive 模式下底噪还没测出来，暂时不判信号。"""
+        return self.mode == MODE_ADAPTIVE and self._noise_floor <= 0
+
+    @property
+    def effective_open_threshold(self) -> float:
+        """当前实际生效的打开阈值。"""
+        if self.mode == MODE_ADAPTIVE and self._noise_floor > 0:
+            return max(self._noise_floor * db_to_ratio(self.open_margin_db),
+                       self.min_open_threshold)
+        return self.open_threshold
+
+    @property
+    def effective_close_threshold(self) -> float:
+        """当前实际生效的关闭阈值 (始终低于打开阈值，保留滞后)。"""
+        if self.mode == MODE_ADAPTIVE and self._noise_floor > 0:
+            value = max(self._noise_floor * db_to_ratio(self.close_margin_db),
+                        self.min_open_threshold * 0.85)
+            return min(value, self.effective_open_threshold * 0.95)
+        return self.close_threshold
+
+    @property
+    def threshold_below_floor(self) -> bool:
+        """关闭阈值是否已经低于实测底噪 (静噪会关不掉)。"""
+        return (self._noise_floor > 0
+                and self.effective_close_threshold <= self._noise_floor)
+
+    @property
+    def stuck_open(self) -> bool:
+        """上一次强制收尾是否是因为静噪关不掉。"""
+        return self._stuck_open
+
+    @property
+    def forced_closes(self) -> int:
+        """因超过最长打开时间而强制收尾的次数。"""
+        return self._forced_closes
+
+    @property
     def signal_duration(self) -> float:
         """当前信号已持续时间（秒），如果无信号则返回 0。"""
         if self.is_open:
             return time.time() - self._signal_start_time
         return 0.0
+
+    def suggested_thresholds(self) -> Tuple[float, float]:
+        """按实测底噪给出建议的 (open, close) 阈值，底噪未知时返回 (0, 0)。"""
+        if self._noise_floor <= 0:
+            return (0.0, 0.0)
+        return (
+            round(self._noise_floor * db_to_ratio(self.open_margin_db), 5),
+            round(self._noise_floor * db_to_ratio(self.close_margin_db), 5),
+        )
 
     def get_status(self) -> dict:
         """获取检测器当前状态。"""
@@ -213,6 +439,15 @@ class SquelchDetector:
             "current_rms": self._current_rms,
             "peak_rms": self._peak_rms,
             "signal_duration": self.signal_duration,
+            "mode": self.mode,
             "open_threshold": self.open_threshold,
             "close_threshold": self.close_threshold,
+            "effective_open": self.effective_open_threshold,
+            "effective_close": self.effective_close_threshold,
+            "noise_floor": self._noise_floor,
+            "floor_samples": self.floor_sample_count,
+            "warming_up": self.warming_up,
+            "threshold_below_floor": self.threshold_below_floor,
+            "stuck_open": self._stuck_open,
+            "forced_closes": self._forced_closes,
         }

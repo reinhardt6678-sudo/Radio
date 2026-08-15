@@ -141,8 +141,9 @@ python main.py report
 **先听哪个频率？** 白天 **11175 kHz**、全天 **8992 kHz** 是 HFGCS 最活跃的，
 夜间用 **4724 kHz**。这三个都是 USB。
 
-**第一次监听的正确姿势**：开 Web 界面，先让它跑 3-5 分钟不要动，
-左侧 Squelch 面板会统计出这个节点的**实测底噪**，然后点一下"按底噪设定"。
+**第一次监听的正确姿势**：默认的静噪是**自适应**的（阈值 = 实测底噪 +6 dB），
+开着不用管，跑两秒测出底噪就开始判信号。想用固定阈值就让它跑 3-5 分钟，
+左侧 Squelch 面板统计出**实测底噪**之后点"按底噪设定"。
 静噪阈值取决于对面节点的 AGC，猜是猜不准的（详见 §6.4）。
 
 ---
@@ -183,14 +184,35 @@ nodes:
 
 ```yaml
 squelch:
+  mode: adaptive          # adaptive = 底噪 +N dB（默认）；absolute = 固定阈值
+
+  # --- adaptive 模式 ---
+  open_margin_db: 6.0     # 开启阈值高于实测底噪多少 dB（6 dB = 底噪 × 2）
+  close_margin_db: 3.0    # 关闭阈值高于实测底噪多少 dB（3 dB = 底噪 × 1.41）
+  min_open_threshold: 0.005   # 开启阈值绝对下限，防止把数字静音当信号
+  floor_window_seconds: 600   # 底噪统计窗口（秒）
+  floor_percentile: 10        # 底噪取窗口内第几百分位
+
+  # --- absolute 模式 ---
   open_threshold: 0.10    # 开启阈值 (RMS, 0-1)：低于它认为是底噪，不录
   close_threshold: 0.085  # 关闭阈值：必须 < open，形成滞后防止频繁开关
+
   tail_time: 3.0          # 信号消失后继续录几秒，防止截断尾音
+  max_open_seconds: 300   # 静噪最长连续打开时间，到点强制收尾（0 = 不限）
   window_size: 1024       # RMS 分析窗口（采样点）
 ```
 
-> **不要照抄这个数**。0.10 是在特定节点上测出来的；换节点、换时段都会变。
-> 正确做法是开 Web 界面按实测底噪标定（§6.4），或者按 `底噪 RMS × 2`（≈ +6 dB）估。
+> 节点开着 AGC（`SET agc=1`），底噪会被自动放大到一个差不多恒定的电平，
+> 同一个信号的绝对 RMS 在不同节点/不同时段能差好几倍。所以默认用 `adaptive`：
+> 阈值跟着实测底噪走，换节点换频率都不用重调。
+>
+> 要用 `absolute` 就**不要照抄这个数**，先量一次底噪再定值（§6.4 或 `diagnose_rms.py`）。
+> **阈值只要低于底噪，静噪打开后就再也关不掉**，信号数会一直停在 0 ——
+> 现在这种情况会在日志和 Web 界面上明确告警，并按 `max_open_seconds` 强制分段。
+
+> `max_open_seconds` 有两个作用：一段几十分钟的连续通联按这个长度分段入库
+> （和 `recording.max_duration` 对齐，一段录音对应一条信号记录）；
+> 阈值配错时也不会一整天憋着不出任何记录。
 
 #### `recording` —— 录制
 
@@ -321,8 +343,11 @@ python main.py -v monitor -f 11175
 
 1. 连接 KiwiSDR 节点，按 `mode` 设置解调滤波器（`src/modes.py` 的 `DEMOD_FILTERS`）
 2. 逐帧解析 SND：`tag(3) + flags(1) + seq(4, 小端) + smeter(2, 大端)` + 音频样本
-3. 静噪检测器算每块 RMS：超过 `open_threshold` → 开录（带 2 秒 pre-roll）
-4. RMS 掉到 `close_threshold` 以下，再等 `tail_time` 秒 → 收尾，写 WAV
+3. 静噪检测器算每块 RMS：超过开启阈值 → 开录（带 2 秒 pre-roll）。
+   `mode: adaptive` 时阈值 = 实测底噪 +6 dB，底噪还没测出来的头两秒不判信号
+4. RMS 掉到关闭阈值以下，再等 `tail_time` 秒 → 收尾，写 WAV。
+   连续打开超过 `max_open_seconds` 会强制收尾分段；断线/停止监听时
+   正在录的那段也会正常收尾入库，不会只剩一个没有记录的 WAV
 5. 对整段音频做频域+时域分析，按解调模式取通带算 SNR 与调制类型
 6. `signals` + `analysis` 两张表各写一行
 7. `Ctrl+C` 停止（Windows 上 `Ctrl+Break` 同样有效）
@@ -467,15 +492,24 @@ python main.py web
 
 左侧 **Squelch** 区：
 
+- **自适应**复选框 —— 勾上就是 `mode: adaptive`，阈值 = 实测底噪 +6 dB / +3 dB，
+  跟着底噪自己走；取消勾选才用下面两个滑块的固定值
 - 两个滑块直接改开启/关闭阈值，点**应用**后**立刻作用到正在跑的检测器**，
   不用停下重来（后端 `POST /api/squelch` 直接改 `SquelchDetector` 实例）
-- **实测底噪 (RMS)** —— 服务器持续统计静噪关闭期间 RMS 的第 20 百分位，
-  窗口约 4 分钟。刚启动时样本不够会显示 `--`，跑几分钟就稳定了
-- **建议阈值 (底噪+6dB)** —— 就是 `底噪 × 2`
-- **按底噪设定** —— 一键把开/关阈值设成 `底噪 × 2` 和 `底噪 × 1.7`
+- **实测底噪 (RMS)** —— 检测器持续统计 RMS 的第 10 百分位，窗口 10 分钟。
+  静噪打开期间也照常统计（低百分位本来就不会被间歇性的信号抬起来），
+  刚启动时样本不够会显示 `采样中...`
+- **建议阈值 (底噪 +6/+3 dB)** —— 就是 `底噪 × 2` 和 `底噪 × 1.41`
+- **生效阈值** —— 当前真正在用的开/关阈值（自适应模式下它会随底噪变）
+- **静噪状态** —— `开 (录制中)` / `关`
+- **按底噪设定** —— 一键切到固定模式并把阈值设成上面的建议值
+
+> ⚠ 如果关闭阈值低于实测底噪，面板顶部会出现黄色告警：这种配置下静噪
+> 打开后永远关不掉，**一整天都不会产生任何信号记录**（信号只在静噪关闭
+> 的那一刻才落库）。看到告警就点"按底噪设定"或勾上"自适应"。
 
 约束（服务端会校验并返回 400）：阈值必须在 0-1 之间，`close < open`（否则没有滞后），
-`tail_time` 在 0-60 秒。
+`tail_time` 在 0-60 秒，`mode` 只能是 `absolute` / `adaptive`。
 
 RMS 曲线上同时画三条线：**噪声基底线**、**静噪开启线**、**静噪关闭线**。
 三条线摆在一起就能一眼看出阈值卡得对不对 —— 开启线应该在噪声基底上方约 6 dB。
@@ -779,8 +813,8 @@ db.close()
 | `GET` | `/api/recordings/{id}/spectrogram` | `bins`(16-256) `cols`(16-600) | 频谱图矩阵 + 包络 |
 | `GET` | `/api/sessions` | `limit`(1-200) | 最近监听会话 |
 | `GET` | `/api/stats` | `days` | 频率活跃度 / 24h 活动 / 调制分布 / SNR 分布 / 按天活动 |
-| `GET` | `/api/squelch` | — | 当前阈值 + 实测底噪 + 建议值 |
-| `POST` | `/api/squelch` | `open_threshold` `close_threshold` `tail_time` | 在线调整，立刻生效 |
+| `GET` | `/api/squelch` | — | 当前模式/阈值 + 实测底噪 + 建议值 + 生效阈值 + 静噪开关状态 |
+| `POST` | `/api/squelch` | `mode` `open_threshold` `close_threshold` `tail_time` `open_margin_db` `close_margin_db` | 在线调整，立刻生效；阈值低于底噪时返回 `warning` |
 | `POST` | `/api/monitor/start` | `frequency` `mode` `node_host` | 开始监听 |
 | `POST` | `/api/monitor/stop` | — | 停止监听 |
 
@@ -793,6 +827,10 @@ curl -s -X POST localhost:8888/api/squelch \
      -H 'Content-Type: application/json' \
      -d '{"open_threshold":0.06,"close_threshold":0.05}'
 
+# 或者直接交给自适应（阈值跟着实测底噪走）
+curl -s -X POST localhost:8888/api/squelch \
+     -H 'Content-Type: application/json' -d '{"mode":"adaptive"}'
+
 # 启动监听
 curl -s -X POST localhost:8888/api/monitor/start \
      -H 'Content-Type: application/json' \
@@ -803,7 +841,8 @@ curl -s 'localhost:8888/api/recordings?days=7&min_snr=12&with_recording=1'
 ```
 
 校验规则：频率 100-30000 kHz；模式仅 `USB/LSB/AM/CW/CWN`；
-静噪阈值 0-1 且 `close < open`；`tail_time` 0-60 秒。不合法一律 400 + 中文错误信息。
+静噪阈值 0-1 且 `close < open`；`tail_time` 0-60 秒；`mode` 仅 `absolute/adaptive`；
+余量 `*_margin_db` 0-40 dB。不合法一律 400 + 中文错误信息。
 
 ### 10.2 WebSocket `/ws`
 
@@ -814,11 +853,11 @@ curl -s 'localhost:8888/api/recordings?days=7&min_snr=12&with_recording=1'
 |--------|------|----------|
 | `init` | 连接建立 | `monitoring` `frequency` `mode` `passband` `spectrum_bins` `recent_signals` `rms_history` |
 | `spectrum` | 每约 170 ms | `bins`(128) `f_max` `snr_db` `noise_floor_db` `peak_frequency_hz` `signal_active` |
-| `realtime` | 每 5 个音频块 | `rms` `smeter` `snr_db` `noise_floor_db` `rms_noise_floor` `dropped_frames` `total_signals` `elapsed` `reconnects` |
+| `realtime` | 每 5 个音频块 | `rms` `smeter` `snr_db` `noise_floor_db` `rms_noise_floor` `dropped_frames` `total_signals` `elapsed` `reconnects` `squelch_mode` `effective_open` `effective_close` `threshold_below_floor` `signal_seconds` |
 | `signal_detected` | 静噪关闭、录音落库后 | `signal_id` `duration` `peak_rms` `smeter_dbm` `snr_db` `bandwidth_hz` `modulation` `modulation_confidence` `has_audio` |
 | `monitor_started` / `monitor_stopped` | 开始/停止 | `frequency` `mode` `node` `passband` / `total_reconnects` |
 | `reconnecting` / `reconnect_wait` / `reconnected` / `node_switch` | 断线恢复 | `message` `attempt` `seconds` `node` |
-| `squelch_updated` | 阈值被改 | `open_threshold` `close_threshold` `tail_time` |
+| `squelch_updated` | 阈值/模式被改 | `open_threshold` `close_threshold` `tail_time` `mode` `effective_open` `effective_close` `warning` |
 | `error` | 监听异常 | `message` |
 
 客户端可以发 `{"action":"ping"}`，服务端回 `{"type":"pong"}`。
@@ -1040,21 +1079,35 @@ v1.3.0 把监听页面重做了。`analyzer.get_spectrogram()` 早就写好却�
 
 ### Q: 监听了很久一个信号都没有？
 
+**先看左侧 Squelch 面板的"静噪状态"**，它一句话就能把两种完全相反的
+情况分开：
+
+- **一直是"关"** —— 阈值太高，信号根本没越过开启阈值
+- **一直是"开 (录制中)"** —— 阈值**太低**（低于底噪）。信号只在静噪
+  **关闭**的那一刻才落库，静噪关不掉就一条记录都不会有，界面上的
+  Signals 会一直停在 0，而录音机在后台一直写盘。这种情况面板顶部会有
+  黄色告警，日志里是 `[SQUELCH-STUCK]`
+
 按可能性排序：
 
-1. **静噪阈值太高**（最常见）。开 Web 界面看实测底噪，点"按底噪设定"（§6.4）
+1. **静噪阈值不对**（最常见）。勾上"自适应"，或点"按底噪设定"（§6.4）。
+   注意阈值要和**实测底噪**比，不要和别的接收机的经验值比
 2. HFGCS 本来就不是一直有信号，EAM 播发有间隔
 3. 频率和时段对不上 —— 参考 `frequencies.yaml` 里的 `active_hours`，
    白天 11175、夜间 4724、全天 8992
 4. 节点位置太远、传播条件不好 —— 收 HFGCS 优先用北美/欧洲的节点
+5. 根本没收到音频 —— 命令行 `monitor` 的 `[MONITORING]` 日志里有
+   `frames=`，它不涨就是链路的问题，和静噪无关
 
 ### Q: RMS 曲线上那几条线分别是什么？
 
 - **红色实/虚线（较亮）** = 静噪**开启**阈值。RMS 越过它就开始录
 - **红色虚线（较淡）** = 静噪**关闭**阈值，比开启阈值低，形成滞后防止频繁开关
-- **灰色虚线** = 服务器实测的**噪声基底**（静噪关闭期间 RMS 的第 20 百分位）
+- **灰色虚线** = 实测的**噪声基底**（10 分钟窗口内 RMS 的第 10 百分位，
+  静噪开着的时候也照常统计）
 
-阈值应该在噪声基底上方约 6 dB（≈ 2 倍）。三条线并排就能一眼看出卡得对不对。
+阈值应该在噪声基底上方约 6 dB（≈ 2 倍）。三条线并排就能一眼看出卡得对不对：
+**开启线掉到灰线下面** = 静噪会一直开着，一条记录都不会出。
 
 ### Q: S-meter 一直是 -160 dBm / 录音里有低频嗡声？
 

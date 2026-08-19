@@ -4,10 +4,13 @@ squelch.py - 静噪检测 / 信号活动检测 (VOX)
 通过分析音频流的 RMS 能量来检测信号活动，
 在信号出现时触发录制，在信号消失后延迟关闭。
 
-两种取阈方式:
-  absolute  固定 RMS 阈值 (老行为)。节点开着 AGC 时，同一个信号在不同
-            节点/不同时段的绝对电平能差好几倍，这个值需要人工校准。
-  adaptive  阈值 = 实测底噪 + N dB，跟着底噪自己走，换节点/换频率不用重调。
+三种取阈方式:
+  smeter    阈值 = 实测 S-meter 底噪 + N dB (默认)。S-meter 是节点在音频
+            AGC **之前** 测的射频电平，因此不受 AGC 压缩影响。93 小时
+            实测里它是唯一在 AGC 开和关两种状态下都能用的判据。
+  adaptive  阈值 = 实测音频底噪 + N dB。只有在 AGC 关闭时才有意义 ——
+            AGC 开着时有信号/没信号的音频 RMS 只差 1.6 dB (中位数)。
+  absolute  固定 RMS 阈值 (最老的行为)，需要人工按节点校准。
 
 无论用哪种方式，检测器都持续统计底噪，并且带两层保护:
   - 关闭阈值低于底噪时告警 (这种配置下静噪打开后永远关不掉)
@@ -24,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 MODE_ABSOLUTE = "absolute"
 MODE_ADAPTIVE = "adaptive"
-VALID_MODES = (MODE_ABSOLUTE, MODE_ADAPTIVE)
+MODE_SMETER = "smeter"
+VALID_MODES = (MODE_ABSOLUTE, MODE_ADAPTIVE, MODE_SMETER)
 
 
 def db_to_ratio(db: float) -> float:
@@ -60,7 +64,12 @@ class SquelchDetector:
                  floor_window_seconds: float = 600.0,
                  floor_percentile: float = 10.0,
                  floor_min_blocks: int = 50,
-                 max_open_seconds: float = 300.0):
+                 max_open_seconds: float = 300.0,
+                 smeter_open_margin_db: float = 14.0,
+                 smeter_close_margin_db: float = 10.0,
+                 smeter_floor_window_seconds: float = 600.0,
+                 smeter_floor_percentile: float = 10.0,
+                 smeter_floor_min_samples: int = 50):
         """
         初始化静噪检测器。
 
@@ -80,6 +89,11 @@ class SquelchDetector:
             floor_percentile: 底噪取窗口内第几百分位
             floor_min_blocks: 至少积累多少块才给出底噪
             max_open_seconds: 静噪最长连续打开时间 (秒)，0 = 不限制
+            smeter_open_margin_db: smeter 模式下打开阈值高于 S-meter 底噪多少 dB
+            smeter_close_margin_db: smeter 模式下关闭阈值高于 S-meter 底噪多少 dB
+            smeter_floor_window_seconds: S-meter 底噪统计窗口 (秒)
+            smeter_floor_percentile: S-meter 底噪取窗口内第几百分位
+            smeter_floor_min_samples: 至少积累多少个 S-meter 样本才给出底噪
         """
         self.open_threshold = open_threshold
         self.close_threshold = close_threshold
@@ -96,6 +110,12 @@ class SquelchDetector:
         self.floor_percentile = floor_percentile
         self.floor_min_blocks = floor_min_blocks
         self.max_open_seconds = max_open_seconds
+
+        self.smeter_open_margin_db = smeter_open_margin_db
+        self.smeter_close_margin_db = smeter_close_margin_db
+        self.smeter_floor_window_seconds = smeter_floor_window_seconds
+        self.smeter_floor_percentile = smeter_floor_percentile
+        self.smeter_floor_min_samples = smeter_floor_min_samples
 
         # 状态
         self.is_open = False           # 静噪是否打开（有信号）
@@ -114,6 +134,13 @@ class SquelchDetector:
         self._floor_samples: deque = deque()
         self._noise_floor = 0.0
         self._last_floor_calc = 0.0
+
+        # 滚动 S-meter 底噪 (timestamp, dBm)。S-meter 在音频 AGC 之前测量，
+        # 所以它反映的是真实射频电平，AGC 开不开都成立。
+        self._smeter_samples: deque = deque()
+        self._smeter_floor: Optional[float] = None
+        self._last_smeter_calc = 0.0
+        self._current_smeter: Optional[float] = None
 
         # 卡死保护
         self._forced_closes = 0
@@ -158,13 +185,18 @@ class SquelchDetector:
             tail_time=sq_cfg.get("tail_time", 3.0),
             pre_roll_seconds=rec_cfg.get("pre_roll", 2.0),
             sample_rate=recv_cfg.get("sample_rate", 12000),
-            mode=sq_cfg.get("mode", MODE_ABSOLUTE),
+            mode=sq_cfg.get("mode", MODE_SMETER),
             open_margin_db=sq_cfg.get("open_margin_db", 6.0),
             close_margin_db=sq_cfg.get("close_margin_db", 3.0),
             min_open_threshold=sq_cfg.get("min_open_threshold", 0.005),
             floor_window_seconds=sq_cfg.get("floor_window_seconds", 600.0),
             floor_percentile=sq_cfg.get("floor_percentile", 10.0),
             max_open_seconds=max_open,
+            smeter_open_margin_db=sq_cfg.get("smeter_open_margin_db", 14.0),
+            smeter_close_margin_db=sq_cfg.get("smeter_close_margin_db", 10.0),
+            smeter_floor_window_seconds=sq_cfg.get(
+                "smeter_floor_window_seconds", 600.0),
+            smeter_floor_percentile=sq_cfg.get("smeter_floor_percentile", 10.0),
         )
 
     def set_callbacks(self,
@@ -183,12 +215,15 @@ class SquelchDetector:
         self._on_close = on_close
         self._on_audio = on_audio
 
-    def process(self, samples: np.ndarray) -> bool:
+    def process(self, samples: np.ndarray,
+                smeter: Optional[float] = None) -> bool:
         """
         处理一块音频样本，更新静噪状态。
 
         Args:
             samples: float32 音频样本数组 (-1.0 到 1.0)
+            smeter: 该帧的 S-meter 读数 (dBm)。mode=smeter 时必须传，
+                    不传则该帧不参与判信号 (但音频照常进 pre-roll)。
 
         Returns:
             当前是否有信号活动
@@ -201,8 +236,24 @@ class SquelchDetector:
         self._rms_history.append(rms)
         self._update_noise_floor(now, rms)
 
+        if smeter is not None:
+            self._current_smeter = float(smeter)
+            self._update_smeter_floor(now, float(smeter))
+
         open_threshold = self.effective_open_threshold
         close_threshold = self.effective_close_threshold
+
+        # 判据分派: smeter 模式看射频电平，其余看音频 RMS
+        if self.mode == MODE_SMETER:
+            level = self._current_smeter
+            if level is None or self._smeter_floor is None:
+                above_open = above_close = False
+            else:
+                above_open = level >= self.effective_smeter_open
+                above_close = level >= self.effective_smeter_close
+        else:
+            above_open = rms >= open_threshold
+            above_close = rms >= close_threshold
 
         if not self.is_open:
             # 当前静噪关闭状态 - 保存到 pre-roll 缓冲区
@@ -218,13 +269,20 @@ class SquelchDetector:
             # adaptive 模式下底噪还没测出来之前不判信号: 这时候退回到一个
             # 没在本节点校准过的绝对阈值，正是这套系统最容易出问题的地方。
             # pre-roll 一直在攒，等底噪出来照样能把开头补回去。
-            if not self.warming_up and rms >= open_threshold:
+            if not self.warming_up and above_open:
                 self.is_open = True
                 self._signal_start_time = now
                 self._last_above_time = now
                 self._peak_rms = rms
 
-                logger.info(f"[SIGNAL-ON] RMS={rms:.4f} (threshold={open_threshold:.4f})")
+                if self.mode == MODE_SMETER:
+                    logger.info(
+                        f"[SIGNAL-ON] S-meter={self._current_smeter:.1f} dBm "
+                        f"(threshold={self.effective_smeter_open:.1f} dBm, "
+                        f"底噪={self._smeter_floor:.1f} dBm, RMS={rms:.4f})")
+                else:
+                    logger.info(
+                        f"[SIGNAL-ON] RMS={rms:.4f} (threshold={open_threshold:.4f})")
 
                 # 回调: 信号开始，传递 pre-roll 数据
                 if self._on_open:
@@ -239,7 +297,7 @@ class SquelchDetector:
                     self._on_audio(samples)
         else:
             # 当前静噪打开状态 - 有信号
-            if rms >= close_threshold:
+            if above_close:
                 self._last_above_time = now
                 self._peak_rms = max(self._peak_rms, rms)
 
@@ -249,7 +307,7 @@ class SquelchDetector:
 
             # 检查是否应该关闭静噪 (信号消失 + tail_time 已过)
             closed = False
-            if rms < close_threshold:
+            if not above_close:
                 if (now - self._last_above_time) >= self.tail_time:
                     self._close(now, reason="signal-end")
                     closed = True
@@ -291,15 +349,30 @@ class SquelchDetector:
             self._forced_closes += 1
             # 到点强制收尾时电平还压在关闭阈值上 = 阈值低于当前底噪，
             # 静噪不是"收到一段长信号"，而是根本关不掉
-            self._stuck_open = self._current_rms >= self.effective_close_threshold
+            if self.mode == MODE_SMETER:
+                self._stuck_open = (
+                    self._current_smeter is not None
+                    and self._smeter_floor is not None
+                    and self._current_smeter >= self.effective_smeter_close)
+            else:
+                self._stuck_open = self._current_rms >= self.effective_close_threshold
             if self._stuck_open:
-                logger.warning(
-                    f"[SQUELCH-STUCK] 静噪已连续打开 {duration:.0f}s 且 RMS "
-                    f"{self._current_rms:.4f} 始终不低于关闭阈值 "
-                    f"{self.effective_close_threshold:.4f} (实测底噪 "
-                    f"{self._noise_floor:.4f}) —— 阈值低于底噪，强制收尾。"
-                    f"请把阈值调到底噪之上，或改用 mode: adaptive"
-                )
+                if self.mode == MODE_SMETER:
+                    logger.warning(
+                        f"[SQUELCH-STUCK] 静噪已连续打开 {duration:.0f}s 且 S-meter "
+                        f"{self._current_smeter:.1f} dBm 始终不低于关闭阈值 "
+                        f"{self.effective_smeter_close:.1f} dBm (实测底噪 "
+                        f"{self._smeter_floor:.1f} dBm) —— 强制收尾。"
+                        f"多半是这个节点底噪一直在涨，或 smeter_close_margin_db 定得太低"
+                    )
+                else:
+                    logger.warning(
+                        f"[SQUELCH-STUCK] 静噪已连续打开 {duration:.0f}s 且 RMS "
+                        f"{self._current_rms:.4f} 始终不低于关闭阈值 "
+                        f"{self.effective_close_threshold:.4f} (实测底噪 "
+                        f"{self._noise_floor:.4f}) —— 阈值低于底噪，强制收尾。"
+                        f"请把阈值调到底噪之上，或改用 mode: smeter"
+                    )
             else:
                 logger.info(
                     f"[SIGNAL-SPLIT] 达到最长连续时间 {self.max_open_seconds:.0f}s，"
@@ -340,6 +413,21 @@ class SquelchDetector:
             [value for _, value in self._floor_samples], self.floor_percentile))
         self._warn_if_below_floor()
 
+    def _update_smeter_floor(self, now: float, smeter: float):
+        """更新滚动 S-meter 底噪 (窗口内的低百分位)。"""
+        self._smeter_samples.append((now, smeter))
+        cutoff = now - self.smeter_floor_window_seconds
+        while self._smeter_samples and self._smeter_samples[0][0] < cutoff:
+            self._smeter_samples.popleft()
+
+        if len(self._smeter_samples) < self.smeter_floor_min_samples:
+            return
+        if (now - self._last_smeter_calc) < self.FLOOR_RECALC_INTERVAL:
+            return
+        self._last_smeter_calc = now
+        self._smeter_floor = float(np.percentile(
+            [v for _, v in self._smeter_samples], self.smeter_floor_percentile))
+
     def _warn_if_below_floor(self):
         """关闭阈值低于底噪时告警 (这种配置下静噪打开后就关不掉了)。"""
         if self.mode != MODE_ABSOLUTE or self._noise_floor <= 0:
@@ -379,9 +467,38 @@ class SquelchDetector:
         return len(self._floor_samples)
 
     @property
+    def smeter_floor(self) -> Optional[float]:
+        """实测 S-meter 底噪 (dBm)，样本还不够时为 None。"""
+        return self._smeter_floor
+
+    @property
+    def current_smeter(self) -> Optional[float]:
+        """最近一帧的 S-meter 读数 (dBm)。"""
+        return self._current_smeter
+
+    @property
+    def effective_smeter_open(self) -> Optional[float]:
+        """smeter 模式下实际生效的打开阈值 (dBm)。"""
+        if self._smeter_floor is None:
+            return None
+        return self._smeter_floor + self.smeter_open_margin_db
+
+    @property
+    def effective_smeter_close(self) -> Optional[float]:
+        """smeter 模式下实际生效的关闭阈值 (dBm)，始终低于打开阈值。"""
+        if self._smeter_floor is None:
+            return None
+        return self._smeter_floor + min(self.smeter_close_margin_db,
+                                        self.smeter_open_margin_db - 0.5)
+
+    @property
     def warming_up(self) -> bool:
-        """adaptive 模式下底噪还没测出来，暂时不判信号。"""
-        return self.mode == MODE_ADAPTIVE and self._noise_floor <= 0
+        """底噪还没测出来，暂时不判信号 (pre-roll 照常攒着)。"""
+        if self.mode == MODE_ADAPTIVE:
+            return self._noise_floor <= 0
+        if self.mode == MODE_SMETER:
+            return self._smeter_floor is None
+        return False
 
     @property
     def effective_open_threshold(self) -> float:
@@ -402,7 +519,9 @@ class SquelchDetector:
 
     @property
     def threshold_below_floor(self) -> bool:
-        """关闭阈值是否已经低于实测底噪 (静噪会关不掉)。"""
+        """关闭阈值是否已经低到底噪上 (静噪会关不掉)。"""
+        if self.mode == MODE_SMETER:
+            return self.smeter_close_margin_db <= 0
         return (self._noise_floor > 0
                 and self.effective_close_threshold <= self._noise_floor)
 
@@ -446,6 +565,13 @@ class SquelchDetector:
             "effective_close": self.effective_close_threshold,
             "noise_floor": self._noise_floor,
             "floor_samples": self.floor_sample_count,
+            "smeter_dbm": self._current_smeter,
+            "smeter_floor": self._smeter_floor,
+            "smeter_open": self.effective_smeter_open,
+            "smeter_close": self.effective_smeter_close,
+            "smeter_open_margin_db": self.smeter_open_margin_db,
+            "smeter_close_margin_db": self.smeter_close_margin_db,
+            "smeter_samples": len(self._smeter_samples),
             "warming_up": self.warming_up,
             "threshold_below_floor": self.threshold_below_floor,
             "stuck_open": self._stuck_open,

@@ -55,7 +55,8 @@ class KiwiSDRClient:
     AUDIO_TIMEOUT = 30.0
 
     def __init__(self, host: str, port: int = 8073,
-                 password: str = None):
+                 password: str = None,
+                 agc: bool = False, man_gain: int = 70):
         """
         初始化 KiwiSDR 客户端。
 
@@ -63,10 +64,17 @@ class KiwiSDRClient:
             host: KiwiSDR 节点地址
             port: WebSocket 端口 (默认 8073)
             password: 节点密码 (如需要)
+            agc: 是否打开节点端 AGC。默认关闭 —— AGC 会把输出电平钉死，
+                 实测 93 小时: 开着时"有信号"和"没信号"的音频 RMS 中位数
+                 只差 1.6 dB，关掉后是 7.1 dB。见 USAGE §6.4
+            man_gain: AGC 关闭时的固定增益 (dB)，每个节点都要单独标定，
+                      目标是让底噪 RMS 落在 0.015 附近
         """
         self.host = host
         self.port = port
         self.password = password or ""
+        self.agc = agc
+        self.man_gain = man_gain
         self.ws: Optional[websockets.ClientProtocol] = None
         self.connected = False
         self._last_seq: Optional[int] = None
@@ -79,6 +87,34 @@ class KiwiSDRClient:
         self._audio_callback: Optional[Callable] = None
         self._keepalive_task: Optional[asyncio.Task] = None
         self._receive_task: Optional[asyncio.Task] = None
+
+    @classmethod
+    def from_config(cls, host: str, port: int, config: dict,
+                    node: dict = None) -> "KiwiSDRClient":
+        """
+        按配置构造客户端。
+
+        AGC 开关取 receiver.agc; 固定增益优先取该节点自己的 man_gain
+        (每个节点底噪不同, 必须单独标定), 取不到再退到 receiver.man_gain。
+        """
+        recv = (config or {}).get("receiver", {}) or {}
+        gain = recv.get("man_gain", 70)
+        if node is None:
+            for n in ((config or {}).get("nodes") or []):
+                if n.get("host") == host:
+                    node = n
+                    break
+        if node and node.get("man_gain") is not None:
+            gain = node["man_gain"]
+        return cls(host, port, agc=bool(recv.get("agc", False)),
+                   man_gain=gain)
+
+    def agc_command(self) -> str:
+        """构造 SET agc 命令。AGC 关闭时用标定过的固定增益。"""
+        if self.agc:
+            return "SET agc=1 hang=0 thresh=-100 slope=6 decay=1000 manGain=50"
+        return ("SET agc=0 hang=0 thresh=-100 slope=6 decay=1000 "
+                f"manGain={int(self.man_gain)}")
 
     @property
     def smeter(self) -> float:
@@ -202,7 +238,10 @@ class KiwiSDRClient:
             await self._send_cmd("SET squelch=0 max=0")
             await self._send_cmd("SET genattn=0")
             await self._send_cmd("SET gen=0 mix=-1")
-            await self._send_cmd("SET agc=1 hang=0 thresh=-100 slope=6 decay=1000 manGain=50")
+            # AGC 只能在这里设定一次。实测: 节点一旦进入 AGC 模式，之后再发
+            # SET agc=0 会被忽略 (增益停在高位不动，与 AGC 开着无异)，
+            # 所以每次重连都必须重新下发，不能在流中途切换。
+            await self._send_cmd(self.agc_command())
             await self._send_cmd("SET compression=0")
 
             self.connected = True

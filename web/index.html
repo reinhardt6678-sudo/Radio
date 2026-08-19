@@ -575,11 +575,22 @@
                 <h3>Squelch <span class="hint" id="sqState">--</span></h3>
                 <div class="sq-warning" id="sqWarning"></div>
                 <div class="form-group">
-                    <label class="sq-mode-row">
-                        <input type="checkbox" id="sqAdaptive" onchange="onSquelchModeChange()">
-                        <span>自适应 (跟随实测底噪)</span>
-                    </label>
-                    <div class="hint" id="sqModeHint">阈值 = 底噪 +6 dB / +3 dB，换节点换频率都不用重调</div>
+                    <label>判据</label>
+                    <select id="sqMode" onchange="onSquelchModeChange()">
+                        <option value="smeter">S-meter 射频电平 (推荐)</option>
+                        <option value="adaptive">自适应 RMS (音频底噪 +N dB)</option>
+                        <option value="absolute">固定 RMS 阈值</option>
+                    </select>
+                    <div class="hint" id="sqModeHint">阈值 = S-meter 底噪 +14 dB。S-meter 在音频 AGC 之前测量，节点开不开 AGC 都有效</div>
+                </div>
+                <div class="form-group" id="sqSmeterGroup">
+                    <label>打开余量 <span class="val" id="sqSmOpenVal">14</span> dB</label>
+                    <input type="range" id="sqSmOpen" min="2" max="40" step="1" value="14"
+                           oninput="onSmeterSlide()">
+                    <label style="margin-top:8px">关闭余量 <span class="val" id="sqSmCloseVal">10</span> dB</label>
+                    <input type="range" id="sqSmClose" min="1" max="39" step="1" value="10"
+                           oninput="onSmeterSlide()">
+                    <div class="hint">实测: +14 dB 抓到 96% 的通联、录制时间占 17%；每 +4 dB 录制量大约减半</div>
                 </div>
                 <div class="form-group">
                     <label>开启阈值 <span class="val" id="sqOpenVal">0.100</span></label>
@@ -590,6 +601,14 @@
                     <label>关闭阈值 <span class="val" id="sqCloseVal">0.085</span></label>
                     <input type="range" id="sqClose" min="0.001" max="0.5" step="0.001" value="0.085"
                            oninput="onSquelchSlide()">
+                </div>
+                <div class="stat-row" id="sqSmFloorRow">
+                    <span class="stat-label">S-meter 底噪</span>
+                    <span class="stat-val" id="sqSmFloor">--</span>
+                </div>
+                <div class="stat-row" id="sqSmEffRow">
+                    <span class="stat-label">S-meter 生效阈值</span>
+                    <span class="stat-val" id="sqSmEffective">--</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">实测底噪 (RMS)</span>
@@ -765,7 +784,7 @@
 
         let squelchOpen = 0.10;
         let squelchClose = 0.085;
-        let squelchMode = 'absolute';
+        let squelchMode = 'smeter';
         let rmsNoiseFloor = 0;
         let passband = [300, 3000];
         let specFMax = 4000;
@@ -1013,8 +1032,12 @@
             document.getElementById('signalBar').style.background = data.signal_active
                 ? 'linear-gradient(90deg, #34d399, #22d3ee, #60a5fa)'
                 : 'linear-gradient(90deg, #3b82f6, #6366f1)';
-            document.getElementById('squelchMarker').style.left =
-                Math.min((squelchOpen / scaleMax) * 100, 100) + '%';
+            const sqMarker = document.getElementById('squelchMarker');
+            sqMarker.style.display = squelchOpen == null ? 'none' : '';
+            if (squelchOpen != null) {
+                sqMarker.style.left =
+                    Math.min((squelchOpen / scaleMax) * 100, 100) + '%';
+            }
 
             const rmsCard = document.getElementById('rmsCard');
             if (data.signal_active) {
@@ -1175,7 +1198,7 @@
                 return;
             }
 
-            const maxRms = Math.max(...rmsData, squelchOpen * 1.3, 0.05);
+            const maxRms = Math.max(...rmsData, (squelchOpen || 0) * 1.3, 0.05);
             const gridLines = 4;
             rmsCtx.strokeStyle = '#1e293b';
             rmsCtx.lineWidth = 1;
@@ -1208,6 +1231,7 @@
             // 静噪阈值线 (开/关)
             [[squelchOpen, 'rgba(248,113,113,0.55)', 'SQUELCH OPEN'],
              [squelchClose, 'rgba(248,113,113,0.28)', 'CLOSE']].forEach(([val, color, label]) => {
+                if (val == null) return;
                 const y = yOf(val);
                 if (y <= pad.top || y >= h - pad.bottom) return;
                 rmsCtx.strokeStyle = color;
@@ -1250,7 +1274,8 @@
             const lastY = yOf(rmsData[rmsData.length - 1]);
             rmsCtx.beginPath();
             rmsCtx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
-            rmsCtx.fillStyle = rmsData[rmsData.length - 1] > squelchOpen ? '#34d399' : '#60a5fa';
+            rmsCtx.fillStyle = (squelchOpen != null && rmsData[rmsData.length - 1] > squelchOpen)
+                ? '#34d399' : '#60a5fa';
             rmsCtx.fill();
             rmsCtx.strokeStyle = '#0a0e17';
             rmsCtx.lineWidth = 2;
@@ -1618,14 +1643,34 @@
         }
 
         // 自适应模式下阈值由后端按底噪算，滑块只在固定模式下有意义
+        const SQ_HINTS = {
+            smeter: '阈值 = S-meter 底噪 +14 dB。S-meter 在音频 AGC 之前测量，节点开不开 AGC 都有效',
+            adaptive: '阈值 = 音频底噪 +6 dB / +3 dB。只有在节点 AGC 关闭时才可靠',
+            absolute: '固定阈值: 一定要高于实测底噪，否则静噪会一直开着',
+        };
+
         function onSquelchModeChange() {
-            const adaptive = document.getElementById('sqAdaptive').checked;
-            squelchMode = adaptive ? 'adaptive' : 'absolute';
-            document.getElementById('sqOpen').disabled = adaptive;
-            document.getElementById('sqClose').disabled = adaptive;
-            document.getElementById('sqModeHint').textContent = adaptive
-                ? '阈值 = 底噪 +6 dB / +3 dB，换节点换频率都不用重调'
-                : '固定阈值: 一定要高于实测底噪，否则静噪会一直开着';
+            squelchMode = document.getElementById('sqMode').value;
+            const isSmeter = squelchMode === 'smeter';
+            const levelLocked = isSmeter || squelchMode === 'adaptive';
+            document.getElementById('sqOpen').disabled = levelLocked;
+            document.getElementById('sqClose').disabled = levelLocked;
+            document.getElementById('sqSmeterGroup').style.display = isSmeter ? '' : 'none';
+            document.getElementById('sqSmFloorRow').style.display = isSmeter ? '' : 'none';
+            document.getElementById('sqSmEffRow').style.display = isSmeter ? '' : 'none';
+            document.getElementById('sqModeHint').textContent = SQ_HINTS[squelchMode];
+            document.getElementById('sqState').textContent = '未应用';
+        }
+
+        function onSmeterSlide() {
+            const open = parseInt(document.getElementById('sqSmOpen').value, 10);
+            let close = parseInt(document.getElementById('sqSmClose').value, 10);
+            if (close >= open) {
+                close = Math.max(1, open - 1);
+                document.getElementById('sqSmClose').value = close;
+            }
+            document.getElementById('sqSmOpenVal').textContent = open;
+            document.getElementById('sqSmCloseVal').textContent = close;
             document.getElementById('sqState').textContent = '未应用';
         }
 
@@ -1653,21 +1698,46 @@
             const sqState = document.getElementById('sqState');
             // 用户改了还没点"应用"时，不要用服务端状态盖掉他正在编辑的选择
             if (state.mode && sqState.textContent !== '未应用') {
-                squelchMode = state.mode;
-                const adaptive = state.mode === 'adaptive';
-                const box = document.getElementById('sqAdaptive');
-                if (box.checked !== adaptive) {
-                    box.checked = adaptive;
+                const sel = document.getElementById('sqMode');
+                if (sel.value !== state.mode) {
+                    sel.value = state.mode;
                     onSquelchModeChange();
                     sqState.textContent = '';
                 }
+                squelchMode = state.mode;
+            }
+            if (state.smeter_open_margin_db != null
+                    && sqState.textContent !== '未应用') {
+                document.getElementById('sqSmOpen').value = state.smeter_open_margin_db;
+                document.getElementById('sqSmClose').value = state.smeter_close_margin_db;
+                document.getElementById('sqSmOpenVal').textContent =
+                    Math.round(state.smeter_open_margin_db);
+                document.getElementById('sqSmCloseVal').textContent =
+                    Math.round(state.smeter_close_margin_db);
+            }
+            if (state.smeter_floor !== undefined) {
+                document.getElementById('sqSmFloor').textContent =
+                    state.smeter_floor == null
+                        ? '采样中...'
+                        : Number(state.smeter_floor).toFixed(1) + ' dBm';
+                document.getElementById('sqSmEffective').textContent =
+                    state.smeter_open == null
+                        ? '--'
+                        : Number(state.smeter_open).toFixed(1) + ' / '
+                          + Number(state.smeter_close).toFixed(1) + ' dBm';
             }
             if (state.effective_open != null) {
                 document.getElementById('sqEffective').textContent =
                     `${Number(state.effective_open).toFixed(3)} / ${Number(state.effective_close).toFixed(3)}`;
-                // 图表上的静噪线按真正生效的阈值画
-                squelchOpen = state.effective_open;
-                squelchClose = state.effective_close;
+                // 图表上的静噪线按真正生效的阈值画。smeter 模式判的是射频电平，
+                // 把 RMS 阈值线画上去只会误导，所以不画。
+                if (squelchMode === 'smeter') {
+                    squelchOpen = null;
+                    squelchClose = null;
+                } else {
+                    squelchOpen = state.effective_open;
+                    squelchClose = state.effective_close;
+                }
             }
             if (state.is_open != null) {
                 const el = document.getElementById('sqOpenState');
@@ -1695,6 +1765,10 @@
                 squelchOpen = s.open_threshold;
                 squelchClose = s.close_threshold;
                 syncSquelchInputs();
+                // 先把判据同步过来并跑一次 onSquelchModeChange，
+                // 否则首次加载时控件的禁用/显示状态和实际判据对不上
+                if (s.mode) document.getElementById('sqMode').value = s.mode;
+                onSquelchModeChange();
                 updateFloorReadout(s);
                 updateSquelchState(s);
                 document.getElementById('sqState').textContent = '';
@@ -1724,7 +1798,7 @@
         function applyNoiseFloor() {
             if (!rmsNoiseFloor) { showToast('还没测到底噪，先跑一会监听', 'error'); return; }
             // 底噪 +6 dB / +3 dB，和后端 suggested_* 同一套口径
-            document.getElementById('sqAdaptive').checked = false;
+            document.getElementById('sqMode').value = 'absolute';
             onSquelchModeChange();
             document.getElementById('sqOpen').value = (rmsNoiseFloor * 2).toFixed(3);
             document.getElementById('sqClose').value = (rmsNoiseFloor * 1.413).toFixed(3);
@@ -1733,30 +1807,39 @@
         }
 
         async function applySquelch() {
-            const adaptive = document.getElementById('sqAdaptive').checked;
+            const mode = document.getElementById('sqMode').value;
             const open = parseFloat(document.getElementById('sqOpen').value);
             const close = parseFloat(document.getElementById('sqClose').value);
+            const payload = {
+                mode: mode,
+                open_threshold: open,
+                close_threshold: close,
+            };
+            if (mode === 'smeter') {
+                payload.smeter_open_margin_db =
+                    parseFloat(document.getElementById('sqSmOpen').value);
+                payload.smeter_close_margin_db =
+                    parseFloat(document.getElementById('sqSmClose').value);
+            }
             try {
                 const resp = await fetch('/api/squelch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        mode: adaptive ? 'adaptive' : 'absolute',
-                        open_threshold: open,
-                        close_threshold: close,
-                    }),
+                    body: JSON.stringify(payload),
                 });
                 const data = await resp.json();
                 if (data.error) { showToast(data.error, 'error'); return; }
-                squelchMode = adaptive ? 'adaptive' : 'absolute';
-                squelchOpen = open;
-                squelchClose = close;
+                squelchMode = mode;
+                squelchOpen = mode === 'smeter' ? null : open;
+                squelchClose = mode === 'smeter' ? null : close;
                 document.getElementById('sqState').textContent = '已应用';
                 if (data.warning) {
                     showToast(data.warning, 'error');
                     addLogEntry('静噪', data.warning, 'yellow');
                 } else {
-                    showToast(adaptive ? '已切换到自适应静噪' : '静噪阈值已生效', 'ok');
+                    showToast({smeter: '已切换到 S-meter 判据',
+                               adaptive: '已切换到自适应静噪'}[mode]
+                              || '静噪阈值已生效', 'ok');
                 }
                 refreshSquelchFloor();
                 drawRmsChart();

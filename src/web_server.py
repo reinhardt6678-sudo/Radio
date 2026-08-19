@@ -23,7 +23,8 @@ from aiohttp import web
 
 from .kiwi_client import KiwiSDRClient
 from .node_manager import NodeManager
-from .squelch import SquelchDetector, MODE_ABSOLUTE, VALID_MODES, db_to_ratio
+from .squelch import (SquelchDetector, MODE_ABSOLUTE, MODE_SMETER,
+                      VALID_MODES, db_to_ratio)
 from .recorder import AudioRecorder
 from .analyzer import SignalAnalyzer
 from .modes import audio_passband, normalize_mode
@@ -485,7 +486,13 @@ class WebMonitorServer:
         det = self._squelch
 
         state = {
-            "mode": sq_cfg.get("mode", MODE_ABSOLUTE),
+            "mode": sq_cfg.get("mode", MODE_SMETER),
+            "smeter_open_margin_db": sq_cfg.get("smeter_open_margin_db", 14.0),
+            "smeter_close_margin_db": sq_cfg.get("smeter_close_margin_db", 10.0),
+            "smeter_floor": None,
+            "smeter_open": None,
+            "smeter_close": None,
+            "smeter_dbm": None,
             "open_threshold": sq_cfg.get("open_threshold", 0.15),
             "close_threshold": sq_cfg.get("close_threshold", 0.085),
             "tail_time": sq_cfg.get("tail_time", 3.0),
@@ -510,6 +517,16 @@ class WebMonitorServer:
                 "threshold_below_floor": det.threshold_below_floor,
                 "stuck_open": det.stuck_open,
                 "forced_closes": det.forced_closes,
+                "smeter_open_margin_db": det.smeter_open_margin_db,
+                "smeter_close_margin_db": det.smeter_close_margin_db,
+                "smeter_floor": (round(det.smeter_floor, 1)
+                                 if det.smeter_floor is not None else None),
+                "smeter_open": (round(det.effective_smeter_open, 1)
+                                if det.effective_smeter_open is not None else None),
+                "smeter_close": (round(det.effective_smeter_close, 1)
+                                 if det.effective_smeter_close is not None else None),
+                "smeter_dbm": (round(det.current_smeter, 1)
+                               if det.current_smeter is not None else None),
             })
         else:
             # 还没开始监听: 生效阈值就是配置值，建议值按最后一次测到的底噪算
@@ -564,6 +581,18 @@ class WebMonitorServer:
                     return web.json_response({"error": "关闭余量需在 0-40 dB 之间"},
                                              status=400)
                 updated["close_margin_db"] = value
+            if "smeter_open_margin_db" in data:
+                value = float(data["smeter_open_margin_db"])
+                if not (0.0 < value <= 60.0):
+                    return web.json_response(
+                        {"error": "S-meter 打开余量需在 0-60 dB 之间"}, status=400)
+                updated["smeter_open_margin_db"] = value
+            if "smeter_close_margin_db" in data:
+                value = float(data["smeter_close_margin_db"])
+                if not (0.0 < value <= 60.0):
+                    return web.json_response(
+                        {"error": "S-meter 关闭余量需在 0-60 dB 之间"}, status=400)
+                updated["smeter_close_margin_db"] = value
             if "open_threshold" in data:
                 value = float(data["open_threshold"])
                 if not (0.0 < value <= 1.0):
@@ -585,6 +614,14 @@ class WebMonitorServer:
         if not updated:
             return web.json_response({"error": "没有可更新的参数"}, status=400)
 
+        sm_open = updated.get("smeter_open_margin_db",
+                              sq_cfg.get("smeter_open_margin_db", 14.0))
+        sm_close = updated.get("smeter_close_margin_db",
+                               sq_cfg.get("smeter_close_margin_db", 10.0))
+        if sm_close >= sm_open:
+            return web.json_response(
+                {"error": "S-meter 关闭余量必须小于打开余量 (否则没有滞后)"}, status=400)
+
         open_th = updated.get("open_threshold", sq_cfg.get("open_threshold", 0.15))
         close_th = updated.get("close_threshold", sq_cfg.get("close_threshold", 0.085))
         if close_th >= open_th:
@@ -603,6 +640,10 @@ class WebMonitorServer:
                 self._squelch.open_margin_db = updated["open_margin_db"]
             if "close_margin_db" in updated:
                 self._squelch.close_margin_db = updated["close_margin_db"]
+            if "smeter_open_margin_db" in updated:
+                self._squelch.smeter_open_margin_db = updated["smeter_open_margin_db"]
+            if "smeter_close_margin_db" in updated:
+                self._squelch.smeter_close_margin_db = updated["smeter_close_margin_db"]
             if "tail_time" in updated:
                 self._squelch.tail_time = updated["tail_time"]
 
@@ -610,7 +651,12 @@ class WebMonitorServer:
         # 但必须明确告诉页面，别让它安安静静地跑一整天不出记录
         state = self._squelch_state()
         warning = None
-        if state["threshold_below_floor"]:
+        if state["mode"] == MODE_SMETER:
+            if state["smeter_close_margin_db"] <= 0:
+                warning = ("S-meter 关闭余量 <= 0: 静噪打开后关不掉，"
+                           "不会产生信号记录")
+                logger.warning(warning)
+        elif state["threshold_below_floor"]:
             warning = (
                 f"关闭阈值 {state['effective_close']:.4f} 不高于实测底噪 "
                 f"{state['rms_noise_floor']:.4f}: 静噪会一直开着，不会产生信号记录。"
@@ -733,7 +779,7 @@ class WebMonitorServer:
 
             try:
                 # 连接 KiwiSDR
-                self._kiwi_client = KiwiSDRClient(host, port)
+                self._kiwi_client = KiwiSDRClient.from_config(host, port, self.config, node)
                 connected = await self._kiwi_client.connect()
 
                 if not connected:
@@ -869,7 +915,7 @@ class WebMonitorServer:
                 async def process_audio(samples, smeter):
                     self._current_rms = float(np.sqrt(np.mean(samples ** 2)))
                     self._current_smeter = smeter
-                    self._squelch.process(samples)
+                    self._squelch.process(samples, smeter)
                     # 以检测器状态为准，不靠回调来维持这个标志:
                     # 强制收尾/断线重连时回调不一定成对出现
                     self._signal_active = self._squelch.is_open

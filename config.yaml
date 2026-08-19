@@ -10,6 +10,7 @@ nodes:
 
   - host: "sdr.ironstonerange.com"
     port: 8075
+    man_gain: 86
     name: "VK5PH SDR3 Australia"
     location: "South Australia"
     lat: -34.96
@@ -17,6 +18,7 @@ nodes:
 
   - host: "kphsdr.com"
     port: 8073
+    man_gain: 82
     name: "KPH California"
     location: "California, USA"
     lat: 38.10
@@ -24,6 +26,7 @@ nodes:
 
   - host: "g3sdr.com"
     port: 8073
+    man_gain: 69
     name: "G3SDR UK"
     location: "United Kingdom"
     lat: 51.32
@@ -31,6 +34,7 @@ nodes:
 
   - host: "la6lukiwisdrth.ddns.net"
     port: 8073
+    man_gain: 67
     name: "LA6LU Thailand"
     location: "Thailand"
     lat: 12.79
@@ -38,6 +42,7 @@ nodes:
 
   - host: "sdr.k1vl.com"
     port: 8073
+    man_gain: 70
     name: "K1VL Vermont USA"
     location: "Vermont, USA"
     lat: 43.51
@@ -45,6 +50,7 @@ nodes:
 
   - host: "114.16.17.147"
     port: 8073
+    man_gain: 80
     name: "Minowa Japan"
     location: "Nagano, Japan"
     lat: 35.91
@@ -52,20 +58,26 @@ nodes:
 
   - host: "178.237.95.113"
     port: 8073
+    man_gain: 67
     name: "HB3YQQ Switzerland"
     location: "Switzerland"
     lat: 46.27
     lon: 6.85
 
-  - host: "greatlakesreceiver.hopto.me"
-    port: 8073
-    name: "Great Lakes Michigan"
-    location: "Michigan, USA"
-    lat: 43.23
-    lon: -86.25
 
 # --- 接收参数 ---
 receiver:
+  # 节点端 AGC。**保持 false**。
+  # 93 小时实测 (4 个节点/109 段): AGC 开着时会把输出电平钉死 ——
+  # "有信号"和"没信号"的音频 RMS 中位数只差 1.6 dB, 射频动 10 dB 音频只跟 2.3 dB;
+  # 关掉之后是 7.1 dB / 8.9 dB。开着 AGC 时任何电平阈值都无解:
+  # 定高一点一整天 0 条, 定低一点录满整天, 中间没有可用档位。
+  agc: false
+  # AGC 关闭时的默认固定增益 (dB)。每个节点底噪不同, 优先用节点自己的
+  # man_gain (见上面的 nodes), 这里只是兜底。
+  # 重新标定: python diagnose_rms.py -f <freq> --all-nodes, 目标底噪 RMS ~0.015。
+  # 换频段要重标 —— 8992 和 11175 的底噪不一样。
+  man_gain: 70
   # 并发连接数上限 (每个连接占用一个 KiwiSDR 通道)
   max_concurrent: 2
   # 每个频率的监听时长 (秒), 0 = 无限
@@ -91,9 +103,25 @@ receiver:
 #     python diagnose_rms.py -f 11175 --all-nodes
 # Web 界面上也有实测底噪和"按底噪设定"。
 squelch:
-  # absolute = 固定阈值 (下面的 open/close_threshold)
-  # adaptive = 底噪 + N dB (下面的 open/close_margin_db)
-  mode: adaptive
+  # smeter   = S-meter 底噪 + N dB (默认, 见下面的 smeter_*_margin_db)
+  # adaptive = 音频底噪 + N dB (只在 agc: false 时才有意义)
+  # absolute = 固定 RMS 阈值 (最老的行为)
+  mode: smeter
+
+  # --- smeter 模式参数 ---
+  # S-meter 是节点在音频 AGC **之前** 测的射频电平, 所以 AGC 开不开都能用。
+  # 93 小时/75 段真通联的实测结果 (AGC 关闭时):
+  #     +6 dB  -> 抓到 100%, 但录制时间占 48%
+  #     +10 dB -> 抓到 100%, 录 34%
+  #     +14 dB -> 抓到 96%,  录 17%   <-- 默认取这个
+  #     +18 dB -> 抓到 69%,  录 5%
+  # 想少录一点就把 open 调高, 每 +4 dB 大约减一半录制量。
+  smeter_open_margin_db: 14.0
+  # 关闭阈值比打开低 4 dB, 形成滞后; 必须 > 0, 否则静噪打开后关不掉
+  smeter_close_margin_db: 10.0
+  # S-meter 底噪统计窗口 (秒) 和取值百分位
+  smeter_floor_window_seconds: 600
+  smeter_floor_percentile: 10
 
   # --- adaptive 模式参数 ---
   # 打开阈值高于实测底噪多少 dB (6 dB = 底噪的 2 倍)

@@ -156,6 +156,9 @@ class SignalAnalyzer:
             envelope_rate_hz=analysis.get("envelope_rate_hz"),
             envelope_depth=analysis.get("envelope_depth"),
             tone_count=analysis.get("tone_count"),
+            syllabic_ratio=analysis.get("syllabic_ratio"),
+            passband_tilt_db=analysis.get("passband_tilt_db"),
+            speech_score=analysis.get("speech_score"),
         )
         return analysis
 
@@ -250,6 +253,8 @@ class SignalAnalyzer:
                 "peak_frequency_hz": 0.0, "spectral_centroid_hz": 0.0,
                 "spectral_flatness": 0.0, "band_flatness": 0.0,
                 "tone_count": 0, "envelope_rate_hz": 0.0, "envelope_depth": 0.0,
+                "syllabic_ratio": 0.0, "passband_tilt_db": 0.0,
+                "speech_score": 0.0, "is_speech": False,
                 "estimated_modulation": "NOISE", "modulation_confidence": 0.0,
                 "modulation_scores": {}, "modulation_description": "噪声/无信号",
             })
@@ -263,6 +268,9 @@ class SignalAnalyzer:
 
         # === 包络分析: 语音音节率 / 键控率 ===
         result.update(self._envelope_analysis(samples, sr))
+
+        # === 人声结构评分 (录完之后给这段录音打分，供排序/过滤) ===
+        result.update(self._speech_analysis(samples, sr, band))
 
         # === 调制类型估算 ===
         label, confidence, scores = self._classify_modulation(result, demod_mode)
@@ -537,6 +545,60 @@ class SignalAnalyzer:
         return float(freqs[indices[-1]] - freqs[indices[0]])
 
     # ==================== 包络 ====================
+
+    def _speech_analysis(self, samples: np.ndarray, sample_rate: int,
+                         band: Tuple[float, float]) -> Dict:
+        """
+        人声结构评分。
+
+        判据来自 93 小时实测: 真通联和噪声的区别不在音量, 而在
+          1) 音节调制 —— 人说话是一句一句的, 包络能量集中在 0.5-4 Hz;
+             噪声的包络能量往高频跑
+          2) 通带倾斜 —— 语音在 USB 通带里低频端更强
+        这两个量都是"形状", 不是电平, 所以节点 AGC 开不开都成立
+        (电平类判据在 AGC 开着时会失效, 见 squelch.py)。
+
+        speech_score 是 0-1 的连续分, 用来给录音排序;
+        is_speech 复现实验里的判定阈值。
+        """
+        empty = {"syllabic_ratio": 0.0, "passband_tilt_db": 0.0,
+                 "speech_score": 0.0, "is_speech": False}
+        block = max(1, int(round(sample_rate / 100.0)))   # 100 Hz 包络
+        if len(samples) < block * 32:
+            return empty
+
+        # --- 包络调制谱 ---
+        n = len(samples) // block * block
+        env = np.abs(samples[:n]).reshape(-1, block).mean(axis=1)
+        e = env - env.mean()
+        if len(e) < 16 or not np.any(e):
+            return empty
+        spec = np.abs(np.fft.rfft(e * np.hanning(len(e))))
+        fr = np.fft.rfftfreq(len(e), block / float(sample_rate))
+        total = spec[(fr > 0.5) & (fr <= 20.0)].sum()
+        if total <= 0:
+            return empty
+        syllabic = float(spec[(fr >= 0.5) & (fr < 4.0)].sum() / total)
+
+        # --- 通带倾斜: 低端 vs 高端 ---
+        lo0, hi0 = band
+        mid = lo0 + (hi0 - lo0) * 0.35
+        win = np.hanning(len(samples))
+        psd = np.abs(np.fft.rfft(samples * win)) ** 2
+        f2 = np.fft.rfftfreq(len(samples), 1.0 / sample_rate)
+        low = psd[(f2 >= lo0) & (f2 < mid)]
+        high = psd[(f2 >= hi0 - (hi0 - lo0) * 0.35) & (f2 < hi0)]
+        if low.size == 0 or high.size == 0 or high.mean() <= 0:
+            tilt = 0.0
+        else:
+            tilt = float(10 * np.log10(max(low.mean(), 1e-30) / high.mean()))
+
+        score = float(np.sqrt(_ramp(syllabic, 0.20, 0.40)
+                              * _ramp(tilt, 0.0, 2.5)))
+        return {"syllabic_ratio": syllabic,
+                "passband_tilt_db": tilt,
+                "speech_score": score,
+                "is_speech": bool(syllabic > 0.30 and tilt > 1.0)}
 
     def _envelope_analysis(self, samples: np.ndarray, sample_rate: int,
                            envelope_rate_hz: float = 200.0) -> Dict:

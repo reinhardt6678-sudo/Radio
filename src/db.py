@@ -119,6 +119,10 @@ class Database:
             "envelope_rate_hz": "REAL",
             "envelope_depth": "REAL",
             "tone_count": "INTEGER",
+            # 人声结构评分 (见 analyzer._speech_analysis)
+            "syllabic_ratio": "REAL",
+            "passband_tilt_db": "REAL",
+            "speech_score": "REAL",
         })
 
         # 创建索引
@@ -301,7 +305,10 @@ class Database:
                       noise_floor_db: float = None,
                       envelope_rate_hz: float = None,
                       envelope_depth: float = None,
-                      tone_count: int = None) -> int:
+                      tone_count: int = None,
+                      syllabic_ratio: float = None,
+                      passband_tilt_db: float = None,
+                      speech_score: float = None) -> int:
         """保存信号分析结果。"""
         with self._lock:
             cursor = self.conn.cursor()
@@ -311,8 +318,10 @@ class Database:
                  estimated_modulation, spectral_centroid_hz, spectral_flatness,
                  crest_factor_db, energy_total, fft_peak_magnitudes, notes,
                  modulation_confidence, demod_mode, noise_floor_db,
-                 envelope_rate_hz, envelope_depth, tone_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 envelope_rate_hz, envelope_depth, tone_count,
+                 syllabic_ratio, passband_tilt_db, speech_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?)
             """, (
                 signal_id,
                 datetime.now(timezone.utc).isoformat(),
@@ -332,6 +341,9 @@ class Database:
                 envelope_rate_hz,
                 envelope_depth,
                 tone_count,
+                syllabic_ratio,
+                passband_tilt_db,
+                speech_score,
             ))
             self.conn.commit()
             return cursor.lastrowid
@@ -381,6 +393,7 @@ class Database:
                 a.estimated_modulation, a.modulation_confidence,
                 a.spectral_flatness, a.crest_factor_db, a.noise_floor_db,
                 a.envelope_rate_hz, a.envelope_depth, a.tone_count,
+                   a.syllabic_ratio, a.passband_tilt_db, a.speech_score,
                 a.demod_mode
             FROM signals s
             LEFT JOIN analysis a ON a.signal_id = s.id
@@ -397,6 +410,7 @@ class Database:
                    a.estimated_modulation, a.modulation_confidence,
                    a.spectral_flatness, a.crest_factor_db, a.noise_floor_db,
                    a.envelope_rate_hz, a.envelope_depth, a.tone_count,
+                   a.syllabic_ratio, a.passband_tilt_db, a.speech_score,
                    a.demod_mode
             FROM signals s
             LEFT JOIN analysis a ON a.signal_id = s.id

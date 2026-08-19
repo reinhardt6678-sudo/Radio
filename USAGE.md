@@ -180,11 +180,43 @@ nodes:
 | `sample_rate` | 12000 | 音频采样率，KiwiSDR 固定 12 kHz |
 | `bandwidth` | 6000 | 音频带宽 Hz |
 
+#### `receiver.agc` / `man_gain` —— 节点 AGC（**先看这个**）
+
+```yaml
+receiver:
+  agc: false        # 保持 false
+  man_gain: 70      # 兜底增益；每个节点用自己的 nodes[].man_gain
+```
+
+节点开着 AGC 时输出电平会被钉死，**有信号和没信号的音频电平只差 1.6 dB
+（中位数）**，关掉之后是 7.1 dB。93 小时 / 4 节点 / 109 段实测，方向在每个
+节点上都一致。这意味着 AGC 开着时**任何 RMS 阈值都无解**：定高一点一整天
+0 条，定低一点录满整天，中间没有可用档位（§6.4 有完整数据）。
+
+两个坑：
+
+- **AGC 只能在连接建立的那一刻设定。** 节点一旦进入 AGC 模式，之后再发
+  `SET agc=0` 会被忽略，增益停在高位（实测差 22 dB）。程序每次重连都会重新
+  下发，你自己写脚本时也要注意。
+- **`man_gain` 每个节点都要单独标定，换频段还要重标。** 目标是让底噪 RMS
+  落在 0.015 附近：
+
+```bash
+python diagnose_rms.py -f 11175 --all-nodes
+```
+
 #### `squelch` —— 静噪（VOX）
 
 ```yaml
 squelch:
-  mode: adaptive          # adaptive = 底噪 +N dB（默认）；absolute = 固定阈值
+  mode: smeter            # smeter = S-meter 底噪 +N dB（默认，推荐）
+                          # adaptive = 音频底噪 +N dB；absolute = 固定 RMS 阈值
+
+  # --- smeter 模式（默认）---
+  smeter_open_margin_db: 14.0   # 打开阈值高于 S-meter 底噪多少 dB
+  smeter_close_margin_db: 10.0  # 关闭阈值，必须 < 打开余量，形成滞后
+  smeter_floor_window_seconds: 600
+  smeter_floor_percentile: 10
 
   # --- adaptive 模式 ---
   open_margin_db: 6.0     # 开启阈值高于实测底噪多少 dB（6 dB = 底噪 × 2）
@@ -344,7 +376,9 @@ python main.py -v monitor -f 11175
 1. 连接 KiwiSDR 节点，按 `mode` 设置解调滤波器（`src/modes.py` 的 `DEMOD_FILTERS`）
 2. 逐帧解析 SND：`tag(3) + flags(1) + seq(4, 小端) + smeter(2, 大端)` + 音频样本
 3. 静噪检测器算每块 RMS：超过开启阈值 → 开录（带 2 秒 pre-roll）。
-   `mode: adaptive` 时阈值 = 实测底噪 +6 dB，底噪还没测出来的头两秒不判信号
+   `mode: smeter`（默认）时阈值 = S-meter 底噪 +14 dB —— S-meter 是节点在
+   音频 AGC **之前**测的射频电平，所以 AGC 开不开都有效；底噪还没测出来之前
+   不判信号（pre-roll 照常攒着，信号开头不会丢）
 4. RMS 掉到关闭阈值以下，再等 `tail_time` 秒 → 收尾，写 WAV。
    连续打开超过 `max_open_seconds` 会强制收尾分段；断线/停止监听时
    正在录的那段也会正常收尾入库，不会只剩一个没有记录的 WAV
@@ -492,7 +526,10 @@ python main.py web
 
 左侧 **Squelch** 区：
 
-- **自适应**复选框 —— 勾上就是 `mode: adaptive`，阈值 = 实测底噪 +6 dB / +3 dB，
+- **判据**下拉 —— 三档：`S-meter 射频电平`（默认，推荐）、`自适应 RMS`、
+  `固定 RMS 阈值`。选 S-meter 时下面会出现打开/关闭余量滑块，以及实测
+  S-meter 底噪和生效阈值；选另外两档才用 RMS 滑块
+- **自适应 RMS** —— 阈值 = 实测音频底噪 +6 dB / +3 dB，
   跟着底噪自己走；取消勾选才用下面两个滑块的固定值
 - 两个滑块直接改开启/关闭阈值，点**应用**后**立刻作用到正在跑的检测器**，
   不用停下重来（后端 `POST /api/squelch` 直接改 `SquelchDetector` 实例）

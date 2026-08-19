@@ -161,7 +161,7 @@ class SignalReceiver:
 
         logger.info(f"[SCAN] freq_count={len(frequencies)}, dwell={dwell}s")
 
-        client = KiwiSDRClient(host, port)
+        client = KiwiSDRClient.from_config(host, port, self.config)
         connected = await client.connect()
 
         if not connected:
@@ -224,7 +224,7 @@ class SignalReceiver:
                                          freq: FrequencyTarget,
                                          duration: float):
         """单频率持续监听。"""
-        client = KiwiSDRClient(host, port)
+        client = KiwiSDRClient.from_config(host, port, self.config)
         connected = await client.connect()
 
         if not connected:
@@ -299,7 +299,7 @@ class SignalReceiver:
             start_time = time.time()
 
             async def process_audio(samples, smeter):
-                squelch.process(samples)
+                squelch.process(samples, smeter)
 
             await client.start_audio_stream(process_audio)
 
@@ -368,7 +368,7 @@ class SignalReceiver:
                                              frequencies: List[FrequencyTarget],
                                              duration: float):
         """多频率轮询监听。"""
-        client = KiwiSDRClient(host, port)
+        client = KiwiSDRClient.from_config(host, port, self.config)
         connected = await client.connect()
 
         if not connected:
@@ -429,7 +429,7 @@ class SignalReceiver:
                 squelch.set_callbacks(on_open=on_open, on_close=on_close, on_audio=on_audio)
 
                 async def process_audio(samples, smeter):
-                    squelch.process(samples)
+                    squelch.process(samples, smeter)
 
                 await client.start_audio_stream(process_audio)
                 await asyncio.sleep(dwell)

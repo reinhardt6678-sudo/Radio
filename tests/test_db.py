@@ -237,3 +237,52 @@ class TestDatabase:
             assert row[0] == 4.2
             assert row[1] == "CW"
             assert row[2] is None
+
+
+class TestNodeSignalQuality:
+    """按节点统计历史接收质量 —— 换节点时用它判断"这个节点听不听得见"。"""
+
+    @pytest.fixture
+    def db(self, tmp_path):
+        database = Database(str(tmp_path / "quality.db"))
+        yield database
+        database.close()
+
+    def _signal(self, db, session_id, host, snr):
+        sid = db.record_signal(
+            session_id=session_id, frequency_khz=11175.0, mode="USB",
+            node_host=host, node_name=host, duration_seconds=3.0,
+            peak_rms=0.1, avg_rms=0.05,
+        )
+        if snr is not None:
+            db.save_analysis(signal_id=sid, snr_db=snr)
+        return sid
+
+    def test_counts_total_and_useful_per_node(self, db):
+        s = db.create_session(node_host="a", node_name="a", frequencies=[11175.0])
+        self._signal(db, s, "good.example", 12.0)
+        self._signal(db, s, "good.example", -5.0)
+        self._signal(db, s, "deaf.example", -7.0)
+        self._signal(db, s, "deaf.example", -6.0)
+
+        q = db.get_node_signal_quality(min_snr_db=6.0)
+
+        assert q["good.example"] == {"total": 2, "useful": 1}
+        assert q["deaf.example"] == {"total": 2, "useful": 0}
+
+    def test_threshold_is_applied(self, db):
+        s = db.create_session(node_host="a", node_name="a", frequencies=[11175.0])
+        self._signal(db, s, "x.example", 5.0)
+
+        assert db.get_node_signal_quality(min_snr_db=6.0)["x.example"]["useful"] == 0
+        assert db.get_node_signal_quality(min_snr_db=3.0)["x.example"]["useful"] == 1
+
+    def test_signal_without_analysis_counts_as_not_useful(self, db):
+        """录了但没分析出结果的，不能算这个节点"听见了"。"""
+        s = db.create_session(node_host="a", node_name="a", frequencies=[11175.0])
+        self._signal(db, s, "y.example", None)
+
+        assert db.get_node_signal_quality()["y.example"] == {"total": 1, "useful": 0}
+
+    def test_empty_db_returns_empty(self, db):
+        assert db.get_node_signal_quality() == {}

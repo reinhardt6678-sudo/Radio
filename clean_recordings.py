@@ -15,7 +15,7 @@ clean_recordings.py - 无意义录音清理工具
 用法:
     python clean_recordings.py                   # 预览模式（只显示，不删除）
     python clean_recordings.py --delete           # 实际删除垃圾录音
-    python clean_recordings.py --delete --clean-db  # 同时清理数据库记录
+    python clean_recordings.py --delete --clean-db  # 连数据库记录一起删 (不推荐)
     python clean_recordings.py --min-duration 3   # 自定义最短时长阈值
     python clean_recordings.py --min-snr 5        # 自定义最低 SNR 阈值
 """
@@ -32,10 +32,19 @@ from typing import List, Dict, Optional
 import yaml
 import numpy as np
 
-# 修复 Windows 控制台编码
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+def _fix_win_console():
+    """
+    修复 Windows 控制台编码。
+
+    只在当脚本跑的时候调用: 以前写在模块顶层，一 import 就把进程的 stdout/stderr
+    换掉，pytest 的捕获会被这一下弄坏 (ValueError: I/O operation on closed file)，
+    整个测试文件都收集不起来。
+    """
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(
+            sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(
+            sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from src.analyzer import SignalAnalyzer
 from src.db import Database
@@ -52,6 +61,12 @@ class RecordingClassifier:
     分析 WAV 文件并判断其是否包含有意义的信号，
     还是仅仅是噪声爆发、脉冲干扰或底噪误触发。
     """
+
+    # 分析器认得出来的"真"调制。判成这些、且 SNR 过得去，就不该被任何
+    # 单条垃圾判据带走 —— 实测 USB_VOICE 的频谱平坦度能到 0.87、峰均比能到
+    # 41 dB，光看这两项会把真通联当成白噪声和脉冲干扰删掉。
+    REAL_MODULATIONS = {"USB_VOICE", "LSB_VOICE", "AM_VOICE", "FSK", "PSK",
+                        "MFSK", "CW"}
 
     # 分类结果
     JUNK_REASONS = {
@@ -70,6 +85,7 @@ class RecordingClassifier:
                  impulse_max_duration: float = 3.0,
                  impulse_min_crest: float = 15.0,
                  silent_rms_threshold: float = 0.005,
+                 keep_speech_score: float = 0.5,
                  analyzer: SignalAnalyzer = None,
                  mode: str = "USB"):
         """
@@ -82,6 +98,10 @@ class RecordingClassifier:
             impulse_max_duration: 脉冲判定的最大时长(秒)
             impulse_min_crest: 脉冲判定的最低峰均比(dB)
             silent_rms_threshold: 静音判定的 RMS 上限
+            keep_speech_score: 语音分到这个数就无条件保留。HF 传播差的时候，
+                  真人声的带内 SNR 完全可能是负的、调制也会被判成 NOISE
+                  (库里有 43 条 speech_score>=0.8 但 SNR<0 的记录)，
+                  只按 SNR 和调制类型删会把这些真通联一起删掉。
             analyzer: 信号分析器实例
             mode: 录音时使用的解调模式，决定 SNR 与调制判定的通带。
                   这里判错会直接导致删错文件 —— 用 AM 录的音按 USB 的
@@ -93,6 +113,7 @@ class RecordingClassifier:
         self.impulse_max_duration = impulse_max_duration
         self.impulse_min_crest = impulse_min_crest
         self.silent_rms_threshold = silent_rms_threshold
+        self.keep_speech_score = keep_speech_score
         self.analyzer = analyzer or SignalAnalyzer()
         self.mode = mode
 
@@ -156,6 +177,7 @@ class RecordingClassifier:
         flatness = analysis.get("spectral_flatness", 0)
         crest = analysis.get("crest_factor_db", 0)
         modulation = analysis.get("estimated_modulation", "UNKNOWN")
+        speech_score = analysis.get("speech_score") or 0.0
 
         # ---- 检查各项指标 ----
 
@@ -202,8 +224,19 @@ class RecordingClassifier:
                 f"RMS {rms:.6f} < {self.silent_rms_threshold}"
             )
 
-        # 综合判定: 满足 1 条即为垃圾
-        result["is_junk"] = len(result["reasons"]) > 0
+        # ---- 保护: 看得出是真信号的，上面任何一条判据都不算数 ----
+        # 判据是"满足一条即为垃圾"，对噪声够用，但对边缘的真信号太狠:
+        # 一段 SNR 3 dB 的 USB 通联会同时踩中 LOW_SNR 和 NOISE_FLAT。
+        protections = []
+        if speech_score >= self.keep_speech_score:
+            protections.append(f"语音分 {speech_score:.2f}")
+        if modulation in self.REAL_MODULATIONS and snr >= self.min_snr:
+            protections.append(f"{modulation} @ {snr:.1f}dB")
+
+        result["protections"] = protections
+
+        # 综合判定: 满足 1 条即为垃圾，但被保护的除外
+        result["is_junk"] = bool(result["reasons"]) and not protections
 
         return result
 
@@ -257,6 +290,9 @@ def scan_recordings(recordings_dir: str, classifier: RecordingClassifier,
                 print(f"  [JUNK] {filename} - {reasons_str}")
         else:
             good_list.append(result)
+            if verbose and result.get("protections"):
+                kept = ", ".join(result["protections"])
+                print(f"  [KEEP] {filename} - 命中判据但受保护: {kept}")
 
     return junk_list, good_list
 
@@ -274,6 +310,9 @@ def print_report(junk_list: List[Dict], good_list: List[Dict]):
     print(f"  有效录音:     {len(good_list)} ({good_size_mb:.1f} MB)")
     print(f"  垃圾录音:     {len(junk_list)} ({junk_size_mb:.1f} MB)")
     print(f"  垃圾占比:     {len(junk_list)/max(total,1)*100:.1f}%")
+    rescued = [r for r in good_list if r.get("protections")]
+    if rescued:
+        print(f"  受保护保留:   {len(rescued)} (踩了判据但看得出是真信号)")
     print("-" * 70)
 
     if not junk_list:
@@ -318,7 +357,8 @@ def delete_junk(junk_list: List[Dict], db: Database = None,
     Args:
         junk_list: 垃圾文件列表
         db: 数据库实例（用于清理 DB 记录）
-        clean_db: 是否同时清理数据库中的对应记录
+        clean_db: 是否同时清理数据库中的对应记录。
+                  同时删掉数据库里的信号记录。**一般别用**: 节点排序 (node_quality_tier) 靠的就是每个节点 total/useful 这两个数，把噪声记录删干净之后，一个连着 87 条 0 真信号的聋节点会从"有实据: 听不见"退回"样本不够"，换节点时又会被挑中。只想腾磁盘的话删文件就够了，记录才 2 MB。
 
     Returns:
         成功删除的文件数
@@ -370,6 +410,8 @@ def delete_junk(junk_list: List[Dict], db: Database = None,
 # ==================== 主入口 ====================
 
 def main():
+    _fix_win_console()
+
     parser = argparse.ArgumentParser(
         description="MilRadio 录音清理工具 - 自动识别并清理无意义的录音文件",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -377,7 +419,7 @@ def main():
 示例:
   python clean_recordings.py                    # 预览模式（只分析不删除）
   python clean_recordings.py --delete           # 删除垃圾录音
-  python clean_recordings.py --delete --clean-db  # 删除文件 + 清理数据库
+  python clean_recordings.py --delete             # 删文件、留记录 (推荐)
   python clean_recordings.py --min-duration 3   # 最短有效时长 3 秒
   python clean_recordings.py --min-snr 8        # 最低有效 SNR 8 dB
   python clean_recordings.py -v                 # 显示每个文件的分析详情
@@ -387,7 +429,7 @@ def main():
     parser.add_argument("--delete", action="store_true",
                         help="实际删除垃圾文件（默认只预览）")
     parser.add_argument("--clean-db", action="store_true",
-                        help="同时清理数据库中对应的信号记录")
+                        help="同时清理数据库记录 (不推荐, 会毁掉节点排序的依据)")
     parser.add_argument("--recordings-dir", type=str, default=None,
                         help="录音目录路径 (默认: config.yaml 中的配置)")
     parser.add_argument("--min-duration", type=float, default=2.0,
@@ -400,6 +442,8 @@ def main():
                         help="脉冲判定最大时长 (秒, 默认: 3.0)")
     parser.add_argument("--impulse-min-crest", type=float, default=15.0,
                         help="脉冲判定最低峰均比 (dB, 默认: 15.0)")
+    parser.add_argument("--keep-speech-score", type=float, default=0.5,
+                        help="语音分不低于此值就无条件保留 (默认: 0.5)")
     parser.add_argument("-m", "--mode", type=str, default="USB",
                         choices=["USB", "LSB", "AM", "CW", "CWN"],
                         help="录音时的解调模式, 决定分析通带 (默认: USB)")
@@ -455,6 +499,7 @@ def main():
         max_flatness=args.max_flatness,
         impulse_max_duration=args.impulse_max_dur,
         impulse_min_crest=args.impulse_min_crest,
+        keep_speech_score=args.keep_speech_score,
         analyzer=analyzer,
         mode=args.mode,
     )
@@ -464,9 +509,12 @@ def main():
     print(f"  最短时长:   {args.min_duration}s")
     print(f"  最低 SNR:   {args.min_snr} dB")
     print(f"  平坦度上限: {args.max_flatness}")
+    print(f"  语音分保护: >= {args.keep_speech_score}")
     print(f"  模式:       {'⚠ 删除模式' if args.delete else '👁 预览模式 (只分析不删除)'}")
     if args.clean_db:
         print(f"  数据库:     ⚠ 同时清理数据库记录")
+        print(f"              ⚠ 这会把节点排序的依据一起删掉 —— "
+              f"聋节点的 0 真信号记录没了，换节点时它会重新被挑中")
     print()
 
     # 扫描并分类
@@ -502,7 +550,7 @@ def main():
     elif not args.delete and junk_list:
         print(f"\n[TIP] 这是预览模式，要实际删除请加 --delete 参数:")
         print(f"       python clean_recordings.py --delete")
-        print(f"       python clean_recordings.py --delete --clean-db  # 同时清理数据库")
+        print(f"       (记录建议留着: 每个节点的噪声条数就是判断它听不听得见的依据)")
 
 
 if __name__ == "__main__":

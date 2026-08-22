@@ -510,6 +510,33 @@ class Database:
         """)
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_node_signal_quality(self, min_snr_db: float = 6.0) -> Dict[str, Dict]:
+        """
+        按节点统计历史接收质量。
+
+        用来回答"这个节点到底听不听得见我要的频率" —— 光看连通性和延迟不够，
+        HF 收得到什么取决于地理位置，延迟最低的节点可能离发射台半个地球。
+
+        Args:
+            min_snr_db: 带内 SNR 到这个数才算"真听见了"
+
+        Returns:
+            {node_host: {"total": 总信号数, "useful": 达标条数}}
+        """
+        cursor = self.conn.execute("""
+            SELECT s.node_host AS host,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN a.snr_db >= ? THEN 1 ELSE 0 END) AS useful
+            FROM signals s
+            LEFT JOIN analysis a ON a.signal_id = s.id
+            WHERE s.node_host IS NOT NULL
+            GROUP BY s.node_host
+        """, (min_snr_db,))
+        return {
+            row["host"]: {"total": row["total"], "useful": row["useful"] or 0}
+            for row in cursor.fetchall()
+        }
+
     def get_all_nodes(self) -> List[Dict]:
         """获取所有节点。"""
         cursor = self.conn.execute("""

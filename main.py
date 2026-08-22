@@ -29,7 +29,7 @@ if sys.platform == 'win32':
 import yaml
 
 from src.db import Database
-from src.node_manager import NodeManager
+from src.node_manager import NodeManager, NODE_QUALITY_MIN_SNR_DB
 from src.receiver import SignalReceiver, FrequencyTarget
 from src.analyzer import SignalAnalyzer
 from src.reporter import Reporter
@@ -391,8 +391,20 @@ async def _select_node(config: dict, db: Database, args) -> dict:
         return None
 
     best = node_mgr.get_best_node()
+    # 把挑中的理由说清楚: 光看延迟看不出这个节点到底收不收得到目标频率
+    try:
+        stat = node_mgr.db.get_node_signal_quality(
+            NODE_QUALITY_MIN_SNR_DB).get(best["host"], {})
+    except Exception:
+        stat = {}
+    if stat.get("useful"):
+        why = f"历史有效信号 {stat['useful']}/{stat['total']} 条"
+    elif stat.get("total"):
+        why = f"历史 {stat['total']} 条记录里没有有效信号"
+    else:
+        why = "没有历史记录"
     print(f"[OK] 选择节点: {best.get('name', best['host'])} "
-          f"(延迟 {best.get('latency_ms', 0):.0f}ms)")
+          f"(延迟 {best.get('latency_ms', 0):.0f}ms, {why})")
     return best
 
 

@@ -13,6 +13,36 @@ from .db import Database
 
 logger = logging.getLogger(__name__)
 
+# --- 节点接收质量分档 ---
+# 延迟只说明网络快慢，说明不了这个节点收不收得到目标频率: HF 靠的是地理位置。
+# 实测 HB3YQQ 瑞士延迟最低，却连着 5.5 小时、85 条记录、0 条真信号,
+# 因为 HFGCS 发射台在美国。
+NODE_QUALITY_MIN_SNR_DB = 6.0   # 带内 SNR 到这个数才算"真听见了"
+NODE_QUALITY_MIN_SAMPLES = 30   # 攒够这么多条记录，才敢断定一个节点听不见
+
+
+def node_quality_tier(host: str, quality: dict) -> int:
+    """
+    按历史记录给节点分档，数字越小越优先。
+
+    0 = 在这个节点上真收到过东西
+    1 = 记录太少，还不知道
+    2 = 记录够多了但一条真信号都没有 —— 有实据说明它听不见
+
+    "没数据"要排在"有数据证明它不行"前面: 没试过的还有机会，
+    试了 85 次 0 条的就别再回去了。
+
+    Args:
+        host: 节点地址
+        quality: db.get_node_signal_quality() 的返回值
+    """
+    stat = (quality or {}).get(host)
+    if not stat:
+        return 1
+    if stat["useful"] > 0:
+        return 0
+    return 2 if stat["total"] >= NODE_QUALITY_MIN_SAMPLES else 1
+
 
 class NodeManager:
     """KiwiSDR 节点管理器。"""
@@ -114,10 +144,27 @@ class NodeManager:
         return self._available_nodes
 
     def get_best_node(self) -> Optional[Dict]:
-        """获取延迟最低的可用节点。"""
+        """
+        挑最佳可用节点。
+
+        先看历史上在这个节点收到过真信号没有，同档之内才比延迟 ——
+        反过来按延迟挑的话，很容易挑中一个网络很快但压根听不见目标频率的节点。
+        """
         if not self._available_nodes:
             return None
-        return self._available_nodes[0]
+
+        quality = {}
+        try:
+            quality = self.db.get_node_signal_quality(NODE_QUALITY_MIN_SNR_DB)
+        except Exception:
+            # 读不出历史就退化成按延迟挑，跟以前一样
+            pass
+
+        return min(self._available_nodes, key=lambda n: (
+            node_quality_tier(n["host"], quality),
+            -((quality.get(n["host"]) or {}).get("useful") or 0),
+            n.get("latency_ms", 9999),
+        ))
 
     def get_node_by_name(self, name: str) -> Optional[Dict]:
         """按名称查找节点。"""

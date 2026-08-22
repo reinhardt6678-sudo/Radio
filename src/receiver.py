@@ -17,8 +17,25 @@ from .squelch import SquelchDetector
 from .recorder import AudioRecorder
 from .analyzer import SignalAnalyzer
 from .db import Database
+from .node_manager import (
+    NODE_QUALITY_MIN_SNR_DB,
+    node_quality_tier,
+)
 
 logger = logging.getLogger(__name__)
+
+# --- 断线重连参数 ---
+# 公共 KiwiSDR 节点随时会把人踢下来: K1VL 是 ip_limit=240 (单 IP 每天 240 分钟),
+# 忙的节点直接回 too_busy。以前这里掉线就退出，一次掉线能把后面几个小时整段空掉,
+# 所以命令行 monitor 也必须自己重连并换节点。
+RECONNECT_BASE_BACKOFF = 5.0   # 首次重连等待秒数
+RECONNECT_MAX_BACKOFF = 60.0   # 退避上限
+MAX_NODE_FAILURES = 3          # 同一节点连续失败几次后换下一个
+HEALTHY_LEG_SECONDS = 60.0     # 连上后至少听满这么久，才算这个节点是好的
+
+# 被迫离开首选节点后，每隔这么久回去试一次。
+# 节点接收质量的分档规则在 node_manager 里，收发两边共用一套。
+PREFERRED_RETRY_SECONDS = 30 * 60
 
 
 class FrequencyTarget:
@@ -78,6 +95,7 @@ class SignalReceiver:
         self._session_id: Optional[int] = None
         self._total_signals = 0
         self._status_callback: Optional[Callable] = None
+        self._left_preferred_at: Optional[float] = None  # 何时被迫离开首选节点
 
     async def monitor(self, node: dict, frequencies: List[FrequencyTarget],
                       duration: float = 0,
@@ -99,13 +117,14 @@ class SignalReceiver:
         port = node.get("port", 8073)
         node_name = node.get("name", host)
 
-        # 创建会话
+        # 会话只建一次: 重连和换节点都算同一次监听，
+        # 否则一天下来数据库里会散落一堆几分钟的碎会话，统计全乱
         freq_list = [f.freq_khz for f in frequencies]
         self._session_id = self.db.create_session(
             node_host=host,
             node_name=node_name,
             frequencies=freq_list,
-            notes=f"监听模式: {len(frequencies)} 个频率"
+            notes=f"监听模式: {len(frequencies)} 个频率 (自动重连)"
         )
 
         logger.info(f"=== 开始监听会话 #{self._session_id} ===")
@@ -113,23 +132,101 @@ class SignalReceiver:
         logger.info(f"频率: {', '.join(f'{f.freq_khz} kHz' for f in frequencies)}")
 
         start_time = time.time()
+        reconnect_count = 0
+        consecutive_failures = 0
+        tried_hosts = set()
+
+        # 首选节点 = 这轮监听一开始挑中的那个。被迫换走之后要定期回来看看，
+        # 否则就会像 2026-08-21 那次: 08:26 掉到瑞士节点，原节点早恢复了也不回去，
+        # 5.5 小时一条真信号都没有
+        preferred_node = node
+        self._left_preferred_at = None
 
         try:
-            # 如果只有一个频率，直接固定监听
-            if len(frequencies) == 1:
-                await self._monitor_single_frequency(
-                    host, port, node_name, frequencies[0], duration
-                )
-            else:
-                # 多频率轮询监听
-                await self._monitor_multiple_frequencies(
-                    host, port, node_name, frequencies, duration
-                )
+            # ===== 断线重连主循环 =====
+            # 一次 _monitor_* 调用只对应一条连接，它返回的原因决定要不要再连一次
+            while self._running:
+                host = node["host"]
+                port = node.get("port", 8073)
+                node_name = node.get("name", host)
+                tried_hosts.add(host)
 
-        except asyncio.CancelledError:
-            logger.info("监听被取消")
-        except Exception as e:
-            logger.error(f"监听异常: {e}", exc_info=True)
+                # duration 是整轮监听的总时长，重连后要接着扣，不能每次从头算
+                remaining = duration
+                if duration > 0:
+                    remaining = duration - (time.time() - start_time)
+                    if remaining <= 0:
+                        break
+
+                leg_start = time.time()
+                try:
+                    if len(frequencies) == 1:
+                        reason = await self._monitor_single_frequency(
+                            host, port, node_name, frequencies[0], remaining
+                        )
+                    else:
+                        reason = await self._monitor_multiple_frequencies(
+                            host, port, node_name, frequencies, remaining
+                        )
+                except asyncio.CancelledError:
+                    logger.info("监听被取消")
+                    break
+                except Exception as e:
+                    logger.error(f"监听异常: {e}", exc_info=True)
+                    reason = "error"
+
+                if reason in ("duration", "stopped") or not self._running:
+                    break
+
+                if reason == "try_preferred":
+                    node = preferred_node
+                    self._left_preferred_at = None
+                    consecutive_failures = 0
+                    tried_hosts = {preferred_node["host"]}
+                    logger.info(
+                        f"回到首选节点: "
+                        f"{preferred_node.get('name', preferred_node['host'])}"
+                    )
+                    continue  # 主动回去，不用退避
+
+                # 连上就被踢 (too_busy) 和压根连不上要一样对待: 都不重置退避,
+                # 否则会在同一个坏节点上无退避地空转
+                if time.time() - leg_start >= HEALTHY_LEG_SECONDS:
+                    consecutive_failures = 0
+                    reconnect_count = 0
+                    tried_hosts = {host}
+                else:
+                    consecutive_failures += 1
+
+                if consecutive_failures >= MAX_NODE_FAILURES:
+                    alt = self._pick_alternative_node(node, tried_hosts)
+                    if alt:
+                        if alt["host"] in tried_hosts:
+                            # 一圈节点全试过了，清空重来
+                            tried_hosts.clear()
+                        if (node["host"] == preferred_node["host"]
+                                and self._left_preferred_at is None):
+                            # 只在真正离开首选节点那一刻记时，别每次换节点都重置
+                            self._left_preferred_at = time.time()
+                        node = alt
+                        consecutive_failures = 0
+                        logger.info(f"切换到备用节点: {alt.get('name', alt['host'])}")
+                    else:
+                        logger.warning("没有别的节点可换，继续重试当前节点")
+
+                backoff = min(
+                    RECONNECT_BASE_BACKOFF * (2 ** min(reconnect_count, 5)),
+                    RECONNECT_MAX_BACKOFF,
+                )
+                reconnect_count += 1
+                self._report_status(
+                    f"[RECONNECT] {reason} | 等待 {backoff:.0f}s 后重连 "
+                    f"(第 {reconnect_count} 次) | 目标节点 "
+                    f"{node.get('name', node['host'])}"
+                )
+                if not await self._sleep_interruptible(backoff):
+                    break
+
         finally:
             elapsed = time.time() - start_time
             self.db.end_session(self._session_id,
@@ -137,7 +234,8 @@ class SignalReceiver:
             self._running = False
             logger.info(
                 f"=== 监听会话结束: 时长 {elapsed:.0f}s, "
-                f"检测到 {self._total_signals} 个信号 ==="
+                f"检测到 {self._total_signals} 个信号, "
+                f"重连 {reconnect_count} 次 ==="
             )
 
     async def scan(self, node: dict, frequencies: List[FrequencyTarget],
@@ -222,14 +320,22 @@ class SignalReceiver:
     async def _monitor_single_frequency(self, host: str, port: int,
                                          node_name: str,
                                          freq: FrequencyTarget,
-                                         duration: float):
-        """单频率持续监听。"""
+                                         duration: float) -> str:
+        """
+        单频率持续监听 —— 一次调用只负责一条连接。
+
+        Returns:
+            退出原因，由 monitor() 决定要不要重连:
+            connect_failed / disconnected / duration / stopped
+        """
         client = KiwiSDRClient.from_config(host, port, self.config)
         connected = await client.connect()
 
         if not connected:
             logger.error(f"无法连接到节点: {node_name}")
-            return
+            return "connect_failed"
+
+        reason = "stopped"
 
         try:
             await client.set_frequency(freq.freq_khz, freq.mode)
@@ -337,20 +443,25 @@ class SignalReceiver:
 
                 if duration > 0 and elapsed >= duration:
                     logger.info(f"已达到设定的监听时长 ({duration}s)")
+                    reason = "duration"
+                    break
+
+                if self._should_return_to_preferred():
+                    reason = "try_preferred"
                     break
 
                 if not client.connected:
                     if client.audio_frames == 0:
                         logger.warning(
                             "KiwiSDR 连接结束，且全程没有收到任何音频帧 —— "
-                            "换个节点重试，或用 python diagnose_rms.py 单独验一次链路"
+                            "这个节点多半有问题，接下来会换一个；"
+                            "想单独验链路用 python diagnose_rms.py"
                         )
                     else:
                         logger.warning(
-                            f"KiwiSDR 连接断开 (共收到 {client.audio_frames} 个音频帧)。"
-                            "命令行 monitor 不会自动重连，需要长时间监听请用 "
-                            "python main.py web"
+                            f"KiwiSDR 连接断开 (共收到 {client.audio_frames} 个音频帧)"
                         )
+                    reason = "disconnected"
                     break
 
             # 停止并清理。
@@ -363,17 +474,27 @@ class SignalReceiver:
         finally:
             await client.disconnect()
 
+        return reason
+
     async def _monitor_multiple_frequencies(self, host: str, port: int,
                                              node_name: str,
                                              frequencies: List[FrequencyTarget],
-                                             duration: float):
-        """多频率轮询监听。"""
+                                             duration: float) -> str:
+        """
+        多频率轮询监听 —— 一次调用只负责一条连接。
+
+        Returns:
+            退出原因，由 monitor() 决定要不要重连:
+            connect_failed / disconnected / duration / stopped
+        """
         client = KiwiSDRClient.from_config(host, port, self.config)
         connected = await client.connect()
 
         if not connected:
             logger.error(f"无法连接到节点: {node_name}")
-            return
+            return "connect_failed"
+
+        reason = "stopped"
 
         try:
             start_time = time.time()
@@ -445,12 +566,98 @@ class SignalReceiver:
                 # 检查持续时间
                 elapsed = time.time() - start_time
                 if duration > 0 and elapsed >= duration:
+                    logger.info(f"已达到设定的监听时长 ({duration}s)")
+                    reason = "duration"
                     break
                 if not client.connected:
+                    logger.warning(
+                        f"KiwiSDR 连接断开 "
+                        f"(共收到 {client.audio_frames} 个音频帧)"
+                    )
+                    reason = "disconnected"
+                    break
+                if self._should_return_to_preferred():
+                    reason = "try_preferred"
                     break
 
         finally:
             await client.disconnect()
+
+        return reason
+
+    def _should_return_to_preferred(self) -> bool:
+        """被迫离开首选节点够久了，该回去看看它恢复没有。"""
+        return (self._left_preferred_at is not None
+                and time.time() - self._left_preferred_at >= PREFERRED_RETRY_SECONDS)
+
+    def _pick_alternative_node(self, current_node: dict,
+                               tried_hosts: set) -> Optional[dict]:
+        """
+        挑一个还没试过的备用节点。
+
+        候选一律从 config 的 nodes 里取 —— 只有配置里才有每个节点单独标定过的
+        man_gain，用数据库那份记录去建客户端会把增益标定丢掉，底噪立刻就不对了。
+
+        排序按"这个节点到底听不听得见"来，延迟只是最后的平手判据: HF 收得到
+        什么取决于地理位置，延迟最低的节点完全可能离发射台半个地球。
+
+        Returns:
+            备用节点; 配置里只有当前这一个节点时返回 None
+        """
+        candidates = [n for n in (self.config.get("nodes") or []) if n.get("host")]
+        if not candidates:
+            return None
+
+        available = set()
+        latency = {}
+        quality = {}
+        try:
+            for n in self.db.get_available_nodes():
+                available.add(n["host"])
+                if n.get("avg_latency_ms") is not None:
+                    latency[n["host"]] = n["avg_latency_ms"]
+            quality = self.db.get_node_signal_quality(NODE_QUALITY_MIN_SNR_DB)
+        except Exception:
+            # 数据库读不出来不算错，退化成按配置顺序挑
+            pass
+
+        def rank(n):
+            host = n["host"]
+            stat = quality.get(host) or {}
+            return (
+                node_quality_tier(host, quality),
+                -(stat.get("useful") or 0),
+                0 if host in available else 1,
+                latency.get(host, float("inf")),
+            )
+
+        candidates.sort(key=rank)
+
+        fresh = [n for n in candidates if n["host"] not in tried_hosts]
+        if fresh:
+            return fresh[0]
+
+        # 一圈都试过了: 回到排名最好的那个从头再来，但别原地重选当前节点
+        others = [n for n in candidates
+                  if n["host"] != current_node.get("host")]
+        return others[0] if others else None
+
+    async def _sleep_interruptible(self, seconds: float) -> bool:
+        """
+        分段等待，等待期间随时能被 stop() 打断。
+
+        直接 await asyncio.sleep(60) 的话，Ctrl+C 之后还得干等满一分钟才退出。
+
+        Returns:
+            True = 睡满了; False = 中途被 stop() 打断
+        """
+        deadline = time.time() + seconds
+        while self._running:
+            left = deadline - time.time()
+            if left <= 0:
+                break
+            await asyncio.sleep(min(1.0, left))
+        return self._running
 
     def stop(self):
         """停止接收。"""

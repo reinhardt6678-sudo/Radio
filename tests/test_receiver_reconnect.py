@@ -67,6 +67,28 @@ def _fake_legs(rx, reasons):
     return used_hosts
 
 
+def _stub_probe(monkeypatch, available, latency_ms=12.0, error="连接超时"):
+    """
+    替掉真正的节点探测，返回一个记录被敲过哪些 host 的列表。
+
+    探测本身是 test_connection 单开的一条短连接，跟正在收音的那条无关，
+    所以测试里只要盯"敲没敲"和"敲完怎么决定"。
+    """
+    probed = []
+
+    async def fake_probe(host, port=8073, timeout=10.0):
+        probed.append(host)
+        return {
+            "host": host, "port": port,
+            "available": available,
+            "latency_ms": latency_ms if available else None,
+            "error": None if available else error,
+        }
+
+    monkeypatch.setattr(receiver_mod, "test_connection", fake_probe)
+    return probed
+
+
 # ==================== 备用节点挑选 ====================
 
 class TestPickAlternativeNode:
@@ -320,20 +342,81 @@ class TestReturnToPreferred:
     5.5 小时没人把它切回去。
     """
 
-    def test_not_due_before_interval(self, env):
+    def test_not_due_before_interval(self, env, monkeypatch):
         rx, _, _ = env
+        probed = _stub_probe(monkeypatch, available=True)
+        rx._preferred_node = dict(NODES[0])
         rx._left_preferred_at = time.time()
-        assert rx._should_return_to_preferred() is False
 
-    def test_not_due_when_never_left(self, env):
+        assert asyncio.run(rx._should_return_to_preferred()) is False
+        assert probed == [], "间隔没到就不该去敲门"
+
+    def test_not_due_when_never_left(self, env, monkeypatch):
         rx, _, _ = env
+        probed = _stub_probe(monkeypatch, available=True)
         rx._left_preferred_at = None
-        assert rx._should_return_to_preferred() is False
 
-    def test_due_after_interval(self, env):
+        assert asyncio.run(rx._should_return_to_preferred()) is False
+        assert probed == []
+
+    def test_due_and_probe_ok_returns_true(self, env, monkeypatch):
         rx, _, _ = env
+        probed = _stub_probe(monkeypatch, available=True)
+        rx._preferred_node = dict(NODES[0])
         rx._left_preferred_at = time.time() - receiver_mod.PREFERRED_RETRY_SECONDS - 1
-        assert rx._should_return_to_preferred() is True
+
+        assert asyncio.run(rx._should_return_to_preferred()) is True
+        assert probed == ["a.example"]
+
+    def test_dead_preferred_does_not_break_current_leg(self, env, monkeypatch):
+        """
+        这条是这次修的正题: 首选节点敲不通时，绝对不能返回 True ——
+        返回 True 就等于把手上正在收的连接掐掉，去连一个明知连不上的节点。
+        """
+        rx, _, _ = env
+        probed = _stub_probe(monkeypatch, available=False)
+        rx._preferred_node = dict(NODES[0])
+        rx._left_preferred_at = time.time() - receiver_mod.PREFERRED_RETRY_SECONDS - 1
+
+        assert asyncio.run(rx._should_return_to_preferred()) is False
+        assert probed == ["a.example"], "该敲的门还是要敲"
+
+    def test_failed_probe_doubles_the_interval(self, env, monkeypatch):
+        rx, _, _ = env
+        _stub_probe(monkeypatch, available=False)
+        rx._preferred_node = dict(NODES[0])
+        base = receiver_mod.PREFERRED_RETRY_SECONDS
+        rx._preferred_retry_backoff = base
+        rx._left_preferred_at = time.time() - base - 1
+
+        asyncio.run(rx._should_return_to_preferred())
+        assert rx._preferred_retry_backoff == base * 2
+
+        # 计时重新起算，所以下一次不会立刻又敲
+        assert asyncio.run(rx._should_return_to_preferred()) is False
+
+    def test_failed_probe_interval_is_capped(self, env, monkeypatch):
+        rx, _, _ = env
+        _stub_probe(monkeypatch, available=False)
+        rx._preferred_node = dict(NODES[0])
+        rx._preferred_retry_backoff = receiver_mod.PREFERRED_RETRY_MAX_SECONDS
+
+        for _ in range(3):
+            rx._left_preferred_at = 0.0     # 强制到期
+            asyncio.run(rx._should_return_to_preferred())
+
+        assert rx._preferred_retry_backoff == receiver_mod.PREFERRED_RETRY_MAX_SECONDS
+
+    def test_healthy_leg_on_preferred_resets_the_interval(self, env, monkeypatch):
+        """在首选节点上重新听顺了，回访间隔要收回最短，不能一直停在放大后的值。"""
+        rx, _, _ = env
+        monkeypatch.setattr(receiver_mod, "HEALTHY_LEG_SECONDS", 0.0)
+        rx._preferred_retry_backoff = receiver_mod.PREFERRED_RETRY_MAX_SECONDS
+
+        _fake_legs(rx, ["disconnected"])
+        asyncio.run(rx.monitor(node=dict(NODES[0]), frequencies=FREQS))
+
+        assert rx._preferred_retry_backoff == receiver_mod.PREFERRED_RETRY_SECONDS
 
     def test_marks_departure_time_when_switching_away(self, env):
         rx, _, _ = env

@@ -12,7 +12,7 @@ import numpy as np
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Callable
 
-from .kiwi_client import KiwiSDRClient
+from .kiwi_client import KiwiSDRClient, test_connection
 from .squelch import SquelchDetector
 from .recorder import AudioRecorder
 from .analyzer import SignalAnalyzer
@@ -33,9 +33,14 @@ RECONNECT_MAX_BACKOFF = 60.0   # 退避上限
 MAX_NODE_FAILURES = 3          # 同一节点连续失败几次后换下一个
 HEALTHY_LEG_SECONDS = 60.0     # 连上后至少听满这么久，才算这个节点是好的
 
-# 被迫离开首选节点后，每隔这么久回去试一次。
+# 被迫离开首选节点后，每隔这么久探一次它恢复没有。
+# 探测失败就把间隔翻倍，上限 PREFERRED_RETRY_MAX_SECONDS —— 一个下线了一整天的
+# 节点不值得每半小时再敲一次门 (2026-08-21 那次 K1VL 连续 14 小时连不上，
+# 固定 30 分钟的回访白烧掉 90 分钟)。
 # 节点接收质量的分档规则在 node_manager 里，收发两边共用一套。
 PREFERRED_RETRY_SECONDS = 30 * 60
+PREFERRED_RETRY_MAX_SECONDS = 6 * 3600
+PREFERRED_PROBE_TIMEOUT = 8.0   # 探测只是敲门，不必等满正式连接的超时
 
 
 class FrequencyTarget:
@@ -96,6 +101,8 @@ class SignalReceiver:
         self._total_signals = 0
         self._status_callback: Optional[Callable] = None
         self._left_preferred_at: Optional[float] = None  # 何时被迫离开首选节点
+        self._preferred_node: Optional[dict] = None      # 首选节点，回访探测要用
+        self._preferred_retry_backoff = PREFERRED_RETRY_SECONDS  # 下次回访的间隔
 
     async def monitor(self, node: dict, frequencies: List[FrequencyTarget],
                       duration: float = 0,
@@ -140,7 +147,9 @@ class SignalReceiver:
         # 否则就会像 2026-08-21 那次: 08:26 掉到瑞士节点，原节点早恢复了也不回去，
         # 5.5 小时一条真信号都没有
         preferred_node = node
+        self._preferred_node = node
         self._left_preferred_at = None
+        self._preferred_retry_backoff = PREFERRED_RETRY_SECONDS
 
         try:
             # ===== 断线重连主循环 =====
@@ -195,6 +204,9 @@ class SignalReceiver:
                     consecutive_failures = 0
                     reconnect_count = 0
                     tried_hosts = {host}
+                    if host == preferred_node["host"]:
+                        # 首选节点又能好好用了，回访间隔收回最短
+                        self._preferred_retry_backoff = PREFERRED_RETRY_SECONDS
                 else:
                     consecutive_failures += 1
 
@@ -446,7 +458,7 @@ class SignalReceiver:
                     reason = "duration"
                     break
 
-                if self._should_return_to_preferred():
+                if await self._should_return_to_preferred():
                     reason = "try_preferred"
                     break
 
@@ -576,7 +588,7 @@ class SignalReceiver:
                     )
                     reason = "disconnected"
                     break
-                if self._should_return_to_preferred():
+                if await self._should_return_to_preferred():
                     reason = "try_preferred"
                     break
 
@@ -585,10 +597,48 @@ class SignalReceiver:
 
         return reason
 
-    def _should_return_to_preferred(self) -> bool:
-        """被迫离开首选节点够久了，该回去看看它恢复没有。"""
-        return (self._left_preferred_at is not None
-                and time.time() - self._left_preferred_at >= PREFERRED_RETRY_SECONDS)
+    async def _should_return_to_preferred(self) -> bool:
+        """
+        被迫离开首选节点够久了，探一下它恢复没有；探通了才值得切回去。
+
+        以前是时间一到就直接把手上这条正在收的连接掐掉去盲连首选节点，连不上
+        再一路退回来。2026-08-21 K1VL 连续 14 小时连不上，这套流程每 30 分钟
+        白烧 3.5 分钟 (3 次超时 + 退避)，一天丢掉 12% 的监听时间。
+
+        现在先用 test_connection 单开一条短连接敲门，手上正在收的那条一点不动:
+        敲通了才返回 True 去切，敲不通就只把下次回访推远一倍。
+        """
+        if self._left_preferred_at is None or not self._preferred_node:
+            return False
+        if time.time() - self._left_preferred_at < self._preferred_retry_backoff:
+            return False
+
+        node = self._preferred_node
+        name = node.get("name", node["host"])
+        result = await test_connection(
+            host=node["host"],
+            port=node.get("port", 8073),
+            timeout=PREFERRED_PROBE_TIMEOUT,
+        )
+
+        if result.get("available"):
+            self._report_status(
+                f"[PROBE] 首选节点 {name} 已恢复 "
+                f"({result.get('latency_ms')}ms)，切回去"
+            )
+            return True
+
+        # 敲不通: 当前连接不动，只把下次回访推远，免得反复空烧
+        self._preferred_retry_backoff = min(
+            self._preferred_retry_backoff * 2, PREFERRED_RETRY_MAX_SECONDS
+        )
+        self._left_preferred_at = time.time()
+        self._report_status(
+            f"[PROBE] 首选节点 {name} 仍然连不上 ({result.get('error')})，"
+            f"{self._preferred_retry_backoff / 60:.0f} 分钟后再探 "
+            f"| 当前节点继续监听，不断线"
+        )
+        return False
 
     def _pick_alternative_node(self, current_node: dict,
                                tried_hosts: set) -> Optional[dict]:

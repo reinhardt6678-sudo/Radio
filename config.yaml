@@ -1,12 +1,19 @@
 # ============================================================
+# MilRadio - main configuration file
 # 军事无线电信号接收系统 - 主配置文件
 # ============================================================
+# Comments in this file are bilingual: English first, Chinese second.
+# 本文件注释为中英双语，英文在前、中文在后。
+# ============================================================
 
-# --- KiwiSDR 公共节点列表 ---
+# --- Public KiwiSDR node list / KiwiSDR 公共节点列表 ---
+# Each node holds: host, port, name, location, max_freq_khz
 # 每个节点包含: host, port, name, location, max_freq_khz
+# These are publicly available KiwiSDR receivers.
 # 这些是公开可用的 KiwiSDR 接收节点
 nodes:
-  # --- 以下节点于 2026-06-01 从 rx.linkfanel.net 验证在线 ---
+  # The nodes below were verified online against rx.linkfanel.net on 2026-06-01.
+  # 以下节点于 2026-06-01 从 rx.linkfanel.net 验证在线
 
   - host: "sdr.ironstonerange.com"
     port: 8075
@@ -65,37 +72,69 @@ nodes:
     lon: 6.85
 
 
-# --- 接收参数 ---
+# --- Reception parameters / 接收参数 ---
 receiver:
+  # AGC at the node. **Keep this false.**
+  # 93 hours measured (4 nodes / 109 segments): with AGC on the output level is pinned --
+  # the median audio RMS differs by only 1.6 dB between "signal" and "no signal", and 10 dB
+  # of RF movement produces only 2.3 dB of audio; with AGC off it is 7.1 dB / 8.9 dB.
+  # With AGC on, no level threshold works: slightly high gives zero records all day,
+  # slightly low records all day, and there is no usable setting in between.
+  #
   # 节点端 AGC。**保持 false**。
   # 93 小时实测 (4 个节点/109 段): AGC 开着时会把输出电平钉死 ——
   # "有信号"和"没信号"的音频 RMS 中位数只差 1.6 dB, 射频动 10 dB 音频只跟 2.3 dB;
   # 关掉之后是 7.1 dB / 8.9 dB。开着 AGC 时任何电平阈值都无解:
   # 定高一点一整天 0 条, 定低一点录满整天, 中间没有可用档位。
   agc: false
+  # Default fixed gain (dB) used when AGC is off. Every node has a different noise floor,
+  # so the node's own man_gain (see nodes above) takes priority; this is only a fallback.
+  # Recalibrate with: python diagnose_rms.py -f <freq> --all-nodes, targeting RMS ~0.015.
+  # Recalibrate when changing band -- 8992 and 11175 do not share a noise floor.
+  #
   # AGC 关闭时的默认固定增益 (dB)。每个节点底噪不同, 优先用节点自己的
   # man_gain (见上面的 nodes), 这里只是兜底。
   # 重新标定: python diagnose_rms.py -f <freq> --all-nodes, 目标底噪 RMS ~0.015。
   # 换频段要重标 —— 8992 和 11175 的底噪不一样。
   man_gain: 70
+  # Concurrent connection limit (each connection occupies one KiwiSDR channel)
   # 并发连接数上限 (每个连接占用一个 KiwiSDR 通道)
   max_concurrent: 2
+  # Listening time per frequency (seconds), 0 = unlimited
   # 每个频率的监听时长 (秒), 0 = 无限
   listen_duration: 0
+  # Dwell time per frequency in scan mode (seconds)
   # 频率扫描模式下每个频率的停留时间 (秒)
   scan_dwell_time: 30
+  # Audio sample rate (KiwiSDR default is 12000 Hz)
   # 音频采样率 (KiwiSDR 默认 12000 Hz)
   sample_rate: 12000
+  # Audio bandwidth (Hz)
   # 音频带宽 (Hz)
   bandwidth: 6000
 
-# --- 静噪 (VOX) 设置 ---
+# --- Squelch (VOX) settings / 静噪 (VOX) 设置 ---
+# With AGC on at the node (see SET agc=1 in kiwi_client) the noise floor is amplified to a
+# roughly constant level: the absolute RMS of the same signal can differ several-fold between
+# nodes and times of day. The three manual adjustments in the CHANGELOG (0.65 -> 0.15 -> 0.10)
+# were all really adjustments to the AGC of the node.
+#
+# That is why the default is smeter: the threshold is the S-meter noise floor + N dB, and the
+# S-meter is the RF level measured *before* the audio AGC, so it holds whether or not AGC is on.
+# Changing node, changing frequency and the day/night noise swing need no retuning.
+#
+# To use a fixed threshold set mode to absolute, but measure the noise floor first --
+# any threshold below the floor leaves the squelch stuck open and the UI stays at 0 signals:
+#     python diagnose_rms.py -f 11175          # one node
+#     python diagnose_rms.py -f 11175 --all-nodes
+# The web UI also shows the measured floor and a "set from noise floor" button.
+#
 # 节点开着 AGC (见 kiwi_client 的 SET agc=1)，底噪会被自动放大到一个
 # 差不多恒定的电平: 同一个信号在不同节点/不同时段的绝对 RMS 能差好几倍。
 # CHANGELOG 里 0.65 -> 0.15 -> 0.10 三次手调，调的其实都是节点的 AGC。
 #
-# 所以默认用 adaptive: 阈值 = 实测底噪 + N dB，跟着底噪自己走。
-# 换节点、换频率、白天晚上的噪声变化都不用再手调。
+# 所以默认用 smeter: 阈值 = S-meter 底噪 + N dB。S-meter 是音频 AGC **之前**
+# 的射频电平，AGC 开不开都成立。换节点、换频率、白天晚上的噪声变化都不用再手调。
 #
 # 想用固定阈值就把 mode 改成 absolute，但一定要先量一次底噪再定值 ——
 # 阈值只要低于底噪，静噪打开后就再也关不掉，界面上会一直是 0 个信号:
@@ -103,12 +142,24 @@ receiver:
 #     python diagnose_rms.py -f 11175 --all-nodes
 # Web 界面上也有实测底噪和"按底噪设定"。
 squelch:
+  # smeter   = S-meter noise floor + N dB (default, see smeter_*_margin_db below)
+  # adaptive = audio noise floor + N dB (only meaningful when agc: false)
+  # absolute = fixed RMS threshold (the oldest behaviour)
+  #
   # smeter   = S-meter 底噪 + N dB (默认, 见下面的 smeter_*_margin_db)
   # adaptive = 音频底噪 + N dB (只在 agc: false 时才有意义)
   # absolute = 固定 RMS 阈值 (最老的行为)
   mode: smeter
 
-  # --- smeter 模式参数 ---
+  # --- smeter mode parameters / smeter 模式参数 ---
+  # The S-meter is the RF level the node measures **before** the audio AGC, so it works
+  # whether AGC is on or off. Measured over 93 hours / 75 real exchanges (with AGC off):
+  #     +6 dB  -> catches 100%, but records 48% of the time
+  #     +10 dB -> catches 100%, records 34%
+  #     +14 dB -> catches 96%,  records 17%   <-- the default
+  #     +18 dB -> catches 69%,  records 5%
+  # Raise open to record less; every +4 dB roughly halves the recorded volume.
+  #
   # S-meter 是节点在音频 AGC **之前** 测的射频电平, 所以 AGC 开不开都能用。
   # 93 小时/75 段真通联的实测结果 (AGC 关闭时):
   #     +6 dB  -> 抓到 100%, 但录制时间占 48%
@@ -117,33 +168,58 @@ squelch:
   #     +18 dB -> 抓到 69%,  录 5%
   # 想少录一点就把 open 调高, 每 +4 dB 大约减一半录制量。
   smeter_open_margin_db: 14.0
+  # The close threshold sits 4 dB below open, giving hysteresis; it must be > 0, or the
+  # squelch cannot close once it has opened.
   # 关闭阈值比打开低 4 dB, 形成滞后; 必须 > 0, 否则静噪打开后关不掉
   smeter_close_margin_db: 10.0
+  # S-meter noise-floor window (seconds) and the percentile taken as the floor
   # S-meter 底噪统计窗口 (秒) 和取值百分位
   smeter_floor_window_seconds: 600
   smeter_floor_percentile: 10
 
-  # --- adaptive 模式参数 ---
+  # --- adaptive mode parameters / adaptive 模式参数 ---
+  # dB above the measured noise floor to open (6 dB = 2x the floor)
   # 打开阈值高于实测底噪多少 dB (6 dB = 底噪的 2 倍)
   open_margin_db: 6.0
+  # dB above the measured noise floor to close (3 dB = 1.41x the floor, leaving hysteresis)
   # 关闭阈值高于实测底噪多少 dB (3 dB = 底噪的 1.41 倍，留滞后)
   close_margin_db: 3.0
+  # Absolute lower bound for the open threshold: when the link is entirely silent (all zeros),
+  # do not mistake digital silence for a signal.
   # 打开阈值的绝对下限: 链路彻底静音(全 0)时不要把数字静音当成信号
   min_open_threshold: 0.005
+  # Noise-floor window (seconds) and the percentile taken as the floor.
+  # A long enough window plus a low percentile means that even with a continuous exchange
+  # lasting several minutes in the middle, most of the window is still noise floor, so the
+  # estimate is not lifted by the signal.
+  #
   # 底噪统计窗口 (秒) 和取值百分位。
   # 窗口开够长 + 取低百分位，即使中间有一段几分钟的连续通联，
   # 窗口里绝大部分仍然是底噪，估计值不会被信号抬起来。
   floor_window_seconds: 600
   floor_percentile: 10
 
-  # --- absolute 模式参数 ---
+  # --- absolute mode parameters / absolute 模式参数 ---
+  # Squelch open threshold (RMS energy, range 0-1)
   # 静噪开启阈值 (RMS 能量, 0-1 范围)
   open_threshold: 0.10
+  # Squelch close threshold (about 85% of open, giving hysteresis against rapid toggling)
   # 静噪关闭阈值 (约 open 的 85%，形成滞后防止频繁切换)
   close_threshold: 0.085
 
+  # Keep recording this long after the signal disappears (seconds), so the tail is not clipped
   # 信号消失后继续录制的延迟 (秒), 防止截断信号尾部
   tail_time: 3.0
+  # Longest continuous squelch-open time (seconds). At the limit it is closed by force:
+  #   - a long exchange is stored in segments of this length
+  #   - when a misconfigured threshold (below the floor) leaves the squelch unable to close,
+  #     it cannot hold everything back all day without producing a single record
+  # Left unset, it is derived from recording (max_duration - pre_roll - 5) so the squelch
+  # finishes before the recorder does -- the other way round, the recorder cuts the file
+  # itself and that file gets no database record.
+  # Writing 0 explicitly = no limit (not recommended: a stuck-open squelch is back to
+  # "zero records all day").
+  #
   # 静噪最长连续打开时间 (秒)。到点强制收尾:
   #   - 长通联按这个长度分段入库
   #   - 阈值配错(低于底噪)导致静噪关不掉时，不会一整天憋着不出任何记录
@@ -151,48 +227,69 @@ squelch:
   # 录音器先收尾 —— 反过来录音器会自己切一刀，那个文件不会有数据库记录。
   # 显式写 0 = 不限制 (不建议: 静噪一旦卡开就又回到"一整天 0 条记录")。
   # max_open_seconds: 293
+  # Analysis window size (samples).
+  # Note: only the offline replay in compare_eam.py uses it. The live SquelchDetector
+  # computes RMS per received audio frame (one KiwiSDR frame = 512 samples = 42.7 ms)
+  # and does not read this value.
+  #
   # 分析窗口大小 (采样点数)
   # 注意: 只有 compare_eam.py 的离线回放用它。实时的 SquelchDetector 是按
   # 收到的每个音频帧算 RMS(KiwiSDR 一帧 512 点 = 42.7 ms)，不读这个值。
   window_size: 1024
 
-# --- 录制设置 ---
+# --- Recording settings / 录制设置 ---
 recording:
+  # Output directory for recordings
   # 录音文件输出目录
   output_dir: "data/recordings"
+  # Longest single segment (seconds); longer recordings are split automatically
   # 最长单段录音时长 (秒), 超过后自动分段
   max_duration: 300
+  # WAV bit depth (16 or 32)
   # WAV 文件位深 (16 或 32)
   bit_depth: 16
+  # pre-roll buffer (seconds), keeping the audio from before the signal started
   # pre-roll 缓冲 (秒), 保留信号开始前的音频
   pre_roll: 2.0
 
-# --- 数据库设置 ---
+# --- Database settings / 数据库设置 ---
 database:
   path: "data/radio_monitor.db"
 
-# --- 分析设置 ---
+# --- Analysis settings / 分析设置 ---
+# Every frequency-domain metric is confined to the demodulation passband
+# (300-3000 Hz for USB, see src/modes.py)
 # 所有频域指标都限制在解调通带内 (USB 为 300-3000 Hz, 见 src/modes.py)
 analysis:
+  # FFT size
   # FFT 大小
   fft_size: 4096
+  # Spectrum analysis window type: hann, hamming, blackman
   # 频谱分析窗口类型: hann, hamming, blackman
   window_type: "hann"
+  # Old-definition bandwidth threshold (dB below peak), kept only to compare with history
   # 旧口径带宽估算阈值 (dB below peak), 仅用于和历史数据对照
   bandwidth_threshold_db: 20
+  # Percentile taken as the in-band noise floor (lower is harder for a signal filling the
+  # passband to lift)
   # 带内噪声基底取第几百分位 (越低越不容易被占满通带的信号抬高)
   noise_percentile: 20
+  # Below this in-band SNR, classify as NOISE (dB)
   # 低于该带内 SNR 判定为 NOISE (dB)
   noise_snr_threshold_db: 3.0
+  # Minimum confidence for a modulation verdict; below it, emit UNKNOWN rather than guess
   # 调制判定的最低置信度, 低于此值输出 UNKNOWN 而不是硬猜
   min_confidence: 0.35
 
-# --- 报告设置 ---
+# --- Report settings / 报告设置 ---
 report:
   output_dir: "reports"
+  # How many recent days the report covers
   # 报告包含的最近天数
   recent_days: 7
+  # Chart DPI
   # 图表 DPI
   chart_dpi: 150
+  # Chart theme: dark, light
   # 图表主题: dark, light
   chart_theme: "dark"

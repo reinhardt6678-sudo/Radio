@@ -1,160 +1,200 @@
 # ============================================================
-# 军事 HF 频率数据库
+# Military HF frequency database / 军事 HF 频率数据库
 # ============================================================
+# Source: publicly compiled material from the radio enthusiast community
 # 来源: 公开的无线电爱好者社区整理资料
-# 所有频率单位: kHz
+# All frequencies are in kHz / 所有频率单位: kHz
+# Modulation modes: USB (upper sideband), AM, CW
 # 调制模式: USB (上边带), AM, CW
+#
+# Comments in this file are bilingual: English first, Chinese second.
+# The description and active_hours *values* are left in Chinese on purpose --
+# they are read at runtime (src/schedule.py parses active_hours) and shown in the
+# web UI and CLI output, so they are data rather than comments.
+#
+# 本文件注释为中英双语，英文在前、中文在后。
+# description 和 active_hours 的**值**特意保持中文 —— 它们是运行时读取的数据
+# (src/schedule.py 会解析 active_hours)，并且会显示在 Web 界面和命令行输出里，
+# 属于数据而不是注释。
 # ============================================================
 
+# --- US Air Force HFGCS (High Frequency Global Communications System) ---
 # --- 美国空军 HFGCS (High Frequency Global Communications System) ---
+# Used mainly for EAM (Emergency Action Messages) and C2 traffic.
+# This is one of the easiest military networks to hear.
 # 主要用于 EAM (Emergency Action Messages) 和 C2 通信
 # 这是最容易监听到的军事通信之一
 hfgcs:
   description: "美军高频全球通信系统 - 最活跃的军事HF网络"
   frequencies:
+    # HFGCS night primary / HFGCS 夜间主频
     - freq: 4724.0
       mode: "USB"
       description: "HFGCS 夜间主频"
       active_hours: "00:00-10:00 UTC"
       priority: high
 
+    # Commonly used by RAF Croughton / RAF Croughton 常用
     - freq: 6712.0
       mode: "USB"
       description: "HFGCS (RAF Croughton 常用)"
       active_hours: "全天"
       priority: medium
 
+    # HFGCS alternate / HFGCS 备用频率
     - freq: 6739.0
       mode: "USB"
       description: "HFGCS 备用频率"
       active_hours: "全天"
       priority: medium
 
+    # One of the round-the-clock primaries / 全天主频之一
     - freq: 8992.0
       mode: "USB"
       description: "HFGCS 全天主频之一"
       active_hours: "全天"
       priority: high
 
+    # HFGCS daytime primary, the busiest of all / 日间主频，最活跃
     - freq: 11175.0
       mode: "USB"
       description: "HFGCS 日间主频 - 最活跃"
       active_hours: "10:00-22:00 UTC"
       priority: high
 
+    # HFGCS daytime alternate / 日间备用
     - freq: 13200.0
       mode: "USB"
       description: "HFGCS 日间备用"
       active_hours: "12:00-20:00 UTC"
       priority: medium
 
+    # HFGCS daytime high band / 日间高频
     - freq: 15016.0
       mode: "USB"
       description: "HFGCS 日间高频"
       active_hours: "14:00-22:00 UTC"
       priority: high
 
-# --- 北约军事通信 ---
+# --- NATO military communications / 北约军事通信 ---
 nato:
   description: "北约及盟军常用 HF 通信频率"
   frequencies:
+    # US Coast Guard HF / 美国海岸警卫队 HF
     - freq: 5696.0
       mode: "USB"
       description: "美国海岸警卫队 HF 通信"
       active_hours: "全天"
       priority: medium
 
+    # US Coast Guard HF / 美国海岸警卫队 HF
     - freq: 8983.0
       mode: "USB"
       description: "美国海岸警卫队 HF"
       active_hours: "全天"
       priority: medium
 
+    # NATO military traffic / 北约军事通信
     - freq: 5708.0
       mode: "USB"
       description: "北约军事通信"
       active_hours: "全天"
       priority: low
 
+    # NATO AWACS command / 北约 AWACS 指挥
     - freq: 9007.0
       mode: "USB"
       description: "北约 AWACS 指挥"
       active_hours: "全天"
       priority: medium
 
+    # Canadian military, Trenton Military / 加拿大军事 Trenton Military
     - freq: 11232.0
       mode: "USB"
       description: "加拿大军事 Trenton Military"
       active_hours: "全天"
       priority: medium
 
+# --- Military aviation (VOLMET / weather broadcasts and military air frequencies) ---
 # --- 军用航空 (VOLMET / 气象广播及军用航空频率) ---
 military_air:
   description: "军用航空通信频率"
   frequencies:
+    # NATO military aviation / NATO 军用航空
     - freq: 4721.0
       mode: "USB"
       description: "NATO 军用航空"
       active_hours: "全天"
       priority: low
 
+    # Architect, UK military air traffic control / 英国军事航空管制
     - freq: 6753.0
       mode: "USB"
       description: "Architect (英国军事航空管制)"
       active_hours: "全天"
       priority: medium
 
+    # Military aviation LDOC / 军用航空 LDOC 频率
     - freq: 8968.0
       mode: "USB"
       description: "军用航空 LDOC 频率"
       active_hours: "全天"
       priority: medium
 
+    # Military aviation traffic / 军用航空通信
     - freq: 11176.0
       mode: "USB"
       description: "军用航空通信"
       active_hours: "全天"
       priority: low
 
-# --- 数字模式信号 (STANAG 等) ---
+# --- Digital mode signals (STANAG and similar) / 数字模式信号 (STANAG 等) ---
 digital:
   description: "军用数字通信信号 - 可识别调制类型但内容加密"
   frequencies:
+    # A frequency STANAG 4285 commonly appears on / STANAG 4285 常见出现频率
     - freq: 4285.0
       mode: "USB"
       description: "STANAG 4285 常见出现频率"
       active_hours: "全天"
       priority: low
 
+    # A band busy with military digital signals / 军用数字信号活跃频段
     - freq: 6998.0
       mode: "USB"
       description: "军用数字信号活跃频段"
       active_hours: "全天"
       priority: low
 
+    # STANAG 4481 / FSK signals / STANAG 4481 / FSK 信号
     - freq: 8495.0
       mode: "USB"
       description: "STANAG 4481 / FSK 信号"
       active_hours: "全天"
       priority: low
 
-# --- 时间信号 / 校准参考 ---
+# --- Time signals / calibration references / 时间信号 / 校准参考 ---
+# These are not military frequencies, but they are useful for calibrating the receiver
+# and confirming that the system is working.
 # 这些不是军事频率，但可用于校准接收器和验证系统工作正常
 reference:
   description: "标准时间信号 - 用于系统校准验证"
   frequencies:
+    # WWV US standard time signal (5 MHz) / WWV 美国标准时间信号
     - freq: 5000.0
       mode: "AM"
       description: "WWV 美国标准时间信号 (5 MHz)"
       active_hours: "24小时"
       priority: low
 
+    # WWV US standard time signal (10 MHz) / WWV 美国标准时间信号
     - freq: 10000.0
       mode: "AM"
       description: "WWV 美国标准时间信号 (10 MHz)"
       active_hours: "24小时"
       priority: low
 
+    # WWV US standard time signal (15 MHz) / WWV 美国标准时间信号
     - freq: 15000.0
       mode: "AM"
       description: "WWV 美国标准时间信号 (15 MHz)"

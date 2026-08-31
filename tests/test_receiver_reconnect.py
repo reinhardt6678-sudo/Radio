@@ -485,3 +485,90 @@ class TestReturnToPreferred:
         asyncio.run(rx.monitor(node=dict(NODES[0]), frequencies=FREQS))
 
         assert rx._left_preferred_at is None
+
+
+# ==================== 哑音节点 / muted nodes ====================
+
+class TestMutedNodeHandling:
+    """
+    A node sending frames without audio must be left immediately, not retried with backoff.
+    只发帧不出声的节点必须立刻离开，而不是退避重试。
+
+    Retrying is pointless here in a way that is not true of a dropped connection: the node
+    connects fine, has low latency and keeps streaming, so attempt 101 yields the same zeros
+    as attempt 1. K1VL Vermont, 2026-08-31: 552 ms latency, clean handshake, 470 frames,
+    0 dropped -- and every sample the constant 0.00003.
+
+    这里的重试和普通掉线不一样，是彻底没有意义的: 节点连得上、延迟低、帧照发,
+    第 101 次尝试和第 1 次拿到的是同一串零。
+    K1VL Vermont 2026-08-31: 延迟 552 ms、握手干净、470 帧、丢 0 帧,
+    而每个采样都是常数 0.00003。
+    """
+
+    def test_switches_node_without_waiting_for_failure_count(self, env, monkeypatch):
+        rx, _, _ = env
+        _stub_probe(monkeypatch, available=True)
+        used = _fake_legs(rx, ["audio_dead"])
+
+        asyncio.run(rx.monitor(dict(NODES[0]), FREQS, duration=0))
+
+        # 第一条连接在 a，判定哑音后立刻换走 —— 没有在 a 上耗掉 MAX_NODE_FAILURES 次
+        assert used[0] == "a.example"
+        assert len(used) > 1
+        assert used[1] != "a.example"
+
+    def test_a_muted_leg_does_not_count_as_healthy(self, env, monkeypatch):
+        """
+        哑音连接可以持续很久 (帧一直在收)，不能因为"这条腿活得够长"就重置失败计数。
+        A muted leg can last a long time because frames keep arriving; its longevity must
+        not reset the failure counter.
+        """
+        rx, _, _ = env
+        _stub_probe(monkeypatch, available=True)
+        monkeypatch.setattr(receiver_mod, "HEALTHY_LEG_SECONDS", 0.0)
+        used = _fake_legs(rx, ["audio_dead"])
+
+        asyncio.run(rx.monitor(dict(NODES[0]), FREQS, duration=0))
+
+        assert used[1] != "a.example"
+
+    def test_muted_observation_demotes_the_node_next_time(self, env):
+        """记进库之后，下一轮挑节点时它应当排到最后。"""
+        rx, db, _ = env
+        for n in NODES:
+            db.upsert_node(host=n["host"], port=n["port"], name=n["name"],
+                           location="", lat=None, lon=None,
+                           is_available=True, latency_ms=10.0)
+        # a 延迟最低，但被观测到哑音
+        db.record_node_audio("a.example", 8073, alive=False)
+        rx.db.get_available_nodes = lambda: [
+            {"host": "a.example", "avg_latency_ms": 1.0},
+            {"host": "b.example", "avg_latency_ms": 900.0},
+        ]
+
+        alt = rx._pick_alternative_node(NODES[2], set())
+        assert alt["host"] == "b.example"
+
+    def test_live_node_still_wins_on_latency(self, env):
+        """没有哑音记录时，原来的择优逻辑不受影响。"""
+        rx, db, _ = env
+        for n in NODES:
+            db.upsert_node(host=n["host"], port=n["port"], name=n["name"],
+                           location="", lat=None, lon=None,
+                           is_available=True, latency_ms=10.0)
+        rx.db.get_available_nodes = lambda: [
+            {"host": "a.example", "avg_latency_ms": 1.0},
+            {"host": "b.example", "avg_latency_ms": 900.0},
+        ]
+        alt = rx._pick_alternative_node(NODES[2], set())
+        assert alt["host"] == "a.example"
+
+    def test_note_node_audio_survives_db_failure(self, env):
+        """记账失败不能拖垮监听 —— 它只是为了让下次选得更准。"""
+        rx, _, _ = env
+
+        def boom(*a, **kw):
+            raise RuntimeError("db down")
+
+        rx.db.record_node_audio = boom
+        rx._note_node_audio("a.example", 8073, "A", alive=False)   # 不抛异常即通过

@@ -151,6 +151,40 @@ squelch:
   # absolute = 固定 RMS 阈值 (最老的行为)
   mode: smeter
 
+  # --- dead-audio guard / 哑音链路保护 ---
+  # Applies to every mode. Some nodes complete the handshake, keep sending audio frames and
+  # report a perfectly normal S-meter, yet every audio sample is a constant value (often 0).
+  # In smeter mode the squelch only looks at the RF level, so such a node triggers happily and
+  # fills the database with all-zero recordings. Measured on K1VL Vermont, 2026-08-31:
+  # 470 frames, 0 dropped, S-meter -101.7 ~ -86.9 dBm, audio RMS min = median = max = 0.00003.
+  # Real audio always carries thermal noise, so its RMS never stays bit-exact constant --
+  # a spread of exactly zero across a whole window is the signature of a muted link.
+  #
+  # 对所有模式生效。有些节点握手正常、音频帧照发、S-meter 读数也完全正常，
+  # 但每一个音频采样都是同一个常数 (通常是 0)。smeter 模式只看射频电平,
+  # 这种节点照样会触发静噪, 于是数据库里堆满全零录音。
+  # K1VL Vermont 实测 (2026-08-31): 470 帧、丢 0 帧、S-meter -101.7 ~ -86.9 dBm,
+  # 而音频 RMS 最小值 = 中位数 = 最大值 = 0.00003。
+  # 真实音频总带着热噪声, RMS 不可能一直纹丝不动 —— 整个窗口内极差为零,
+  # 就是链路哑音的签名。
+  #
+  # Rolling window used to judge liveness (seconds)
+  # 判定链路活性的滚动窗口 (秒)
+  dead_audio_window_seconds: 30.0
+  # Minimum blocks required before judging at all (one KiwiSDR frame ~= 42.7 ms,
+  # so 50 blocks ~= 2.1 s). Below this the guard stays silent rather than guessing.
+  # Set to 0 to disable the guard completely.
+  # 至少积累多少块才下判断 (一个 KiwiSDR 帧约 42.7 ms, 50 块约 2.1 秒)。
+  # 不够这个数就不判, 而不是硬猜。写 0 则完全关闭这个判定。
+  dead_audio_min_blocks: 50
+  # Peak-to-peak RMS spread at or below which the window counts as dead.
+  # Kept deliberately tiny: a live link measured 0.0076 ~ 0.0172 over the same window,
+  # four orders of magnitude above this, so there is no realistic false-positive risk.
+  # 窗口内 RMS 极差小于等于这个值就判为哑音。
+  # 刻意取得极小: 同样窗口下正常链路实测 0.0076 ~ 0.0172, 比这个大四个数量级,
+  # 现实中不存在误判风险。
+  dead_audio_rms_spread: 0.000001
+
   # --- smeter mode parameters / smeter 模式参数 ---
   # The S-meter is the RF level the node measures **before** the audio AGC, so it works
   # whether AGC is on or off. Measured over 93 hours / 75 real exchanges (with AGC off):

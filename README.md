@@ -8,7 +8,7 @@ live web listening interface.
 **军事无线电信号接收与元数据分析系统** —— 通过全球公开的 KiwiSDR 网络接收 HF 信号，
 自动静噪录音、频谱分析、调制识别，全部元数据落进 SQLite，附带实时 Web 监听界面。
 
-Current version **v1.4.2** · 当前版本 **v1.4.2**
+Current version **v1.4.3** · 当前版本 **v1.4.3**
 
 > **All documentation in this repository is bilingual: English first, Chinese second.**
 > 本仓库所有文档均为中英双语，英文在前、中文在后。

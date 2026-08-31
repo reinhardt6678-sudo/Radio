@@ -69,7 +69,10 @@ class SquelchDetector:
                  smeter_close_margin_db: float = 10.0,
                  smeter_floor_window_seconds: float = 600.0,
                  smeter_floor_percentile: float = 10.0,
-                 smeter_floor_min_samples: int = 50):
+                 smeter_floor_min_samples: int = 50,
+                 dead_audio_window_seconds: float = 30.0,
+                 dead_audio_min_blocks: int = 50,
+                 dead_audio_rms_spread: float = 1e-6):
         """
         初始化静噪检测器。
 
@@ -94,6 +97,14 @@ class SquelchDetector:
             smeter_floor_window_seconds: S-meter 底噪统计窗口 (秒)
             smeter_floor_percentile: S-meter 底噪取窗口内第几百分位
             smeter_floor_min_samples: 至少积累多少个 S-meter 样本才给出底噪
+            dead_audio_window_seconds: rolling window used to judge audio liveness (seconds)
+                                       判定音频活性的滚动窗口 (秒)
+            dead_audio_min_blocks: minimum blocks before the liveness verdict is made at all
+                                   至少积累多少块才给出活性判定
+            dead_audio_rms_spread: peak-to-peak RMS spread at or below which the link counts
+                                   as muted (real audio always jitters by far more)
+                                   RMS 极差小于等于这个值就判为链路哑音
+                                   (真实音频的抖动远大于此)
         """
         self.open_threshold = open_threshold
         self.close_threshold = close_threshold
@@ -116,6 +127,10 @@ class SquelchDetector:
         self.smeter_floor_window_seconds = smeter_floor_window_seconds
         self.smeter_floor_percentile = smeter_floor_percentile
         self.smeter_floor_min_samples = smeter_floor_min_samples
+
+        self.dead_audio_window_seconds = dead_audio_window_seconds
+        self.dead_audio_min_blocks = dead_audio_min_blocks
+        self.dead_audio_rms_spread = dead_audio_rms_spread
 
         # 状态
         self.is_open = False           # 静噪是否打开（有信号）
@@ -141,6 +156,18 @@ class SquelchDetector:
         self._smeter_floor: Optional[float] = None
         self._last_smeter_calc = 0.0
         self._current_smeter: Optional[float] = None
+
+        # Audio liveness window (timestamp, rms). Deliberately separate from _rms_history,
+        # which _close() clears on every signal -- liveness has to be judged across the whole
+        # connection, not reset each time the squelch closes.
+        #
+        # 音频活性窗口 (timestamp, rms)。刻意不复用 _rms_history ——
+        # 那个每出一条信号就被 _close() 清空，而活性要跨整条连接判断，
+        # 不能每次静噪关闭就归零。
+        self._audio_samples: deque = deque()
+        self._audio_dead = False
+        self._audio_dead_warned = False
+        self._audio_alive_confirmed = False
 
         # 卡死保护
         self._forced_closes = 0
@@ -194,6 +221,10 @@ class SquelchDetector:
             max_open_seconds=max_open,
             smeter_open_margin_db=sq_cfg.get("smeter_open_margin_db", 14.0),
             smeter_close_margin_db=sq_cfg.get("smeter_close_margin_db", 10.0),
+            dead_audio_window_seconds=sq_cfg.get(
+                "dead_audio_window_seconds", 30.0),
+            dead_audio_min_blocks=sq_cfg.get("dead_audio_min_blocks", 50),
+            dead_audio_rms_spread=sq_cfg.get("dead_audio_rms_spread", 1e-6),
             smeter_floor_window_seconds=sq_cfg.get(
                 "smeter_floor_window_seconds", 600.0),
             smeter_floor_percentile=sq_cfg.get("smeter_floor_percentile", 10.0),
@@ -235,6 +266,7 @@ class SquelchDetector:
         self._current_rms = rms
         self._rms_history.append(rms)
         self._update_noise_floor(now, rms)
+        self._update_audio_liveness(now, rms)
 
         if smeter is not None:
             self._current_smeter = float(smeter)
@@ -269,7 +301,12 @@ class SquelchDetector:
             # adaptive 模式下底噪还没测出来之前不判信号: 这时候退回到一个
             # 没在本节点校准过的绝对阈值，正是这套系统最容易出问题的地方。
             # pre-roll 一直在攒，等底噪出来照样能把开头补回去。
-            if not self.warming_up and above_open:
+            # 链路哑音时不许开静噪: smeter 模式只看射频电平，节点不出声也照样过阈值,
+            # 放行的话录下来的是一串全零样本，还会被当成信号写进库。
+            # Never open on a muted link: in smeter mode the criterion is RF level alone, so a
+            # silent node still crosses the threshold -- letting it through records all-zero
+            # samples and files them in the database as if they were signals.
+            if not self.warming_up and not self._audio_dead and above_open:
                 self.is_open = True
                 self._signal_start_time = now
                 self._last_above_time = now
@@ -413,6 +450,59 @@ class SquelchDetector:
             [value for _, value in self._floor_samples], self.floor_percentile))
         self._warn_if_below_floor()
 
+    def _update_audio_liveness(self, now: float, rms: float):
+        """
+        Track whether the node is actually delivering audio.
+
+        A node can complete the handshake, stream frames and report a healthy S-meter while
+        every audio sample is the same constant -- the link is muted. Real audio always
+        carries thermal noise, so its per-block RMS never stays bit-exact across a whole
+        window; a peak-to-peak spread of zero is therefore conclusive, not a heuristic.
+
+        判断节点是不是真的在送音频。
+
+        节点可能握手正常、帧照发、S-meter 也健康，但每个音频采样都是同一个常数 ——
+        链路是哑的。真实音频总带着热噪声，逐块 RMS 不可能整个窗口纹丝不动，
+        所以"极差为零"是确凿判据，不是启发式猜测。
+        """
+        # dead_audio_min_blocks <= 0 关闭整个判定。留这个开关是因为判据本身
+        # 会把"恒定音频"一律当成哑音，而离线回放、合成信号的测试夹具正是恒定的。
+        # Setting dead_audio_min_blocks <= 0 disables the guard entirely. The escape hatch
+        # exists because the criterion treats any constant audio as muted, and offline
+        # replay or synthetic test fixtures are exactly that.
+        if self.dead_audio_min_blocks <= 0:
+            return
+
+        self._audio_samples.append((now, rms))
+        cutoff = now - self.dead_audio_window_seconds
+        while self._audio_samples and self._audio_samples[0][0] < cutoff:
+            self._audio_samples.popleft()
+
+        # 样本不够就不下判断: 刚连上那几百毫秒本来就可能全是同一个值
+        # Too few samples to judge: the first few hundred ms after connecting can
+        # legitimately read the same value throughout.
+        if len(self._audio_samples) < self.dead_audio_min_blocks:
+            return
+
+        values = [v for _, v in self._audio_samples]
+        spread = max(values) - min(values)
+        dead = spread <= self.dead_audio_rms_spread
+
+        if dead and not self._audio_dead:
+            self._audio_dead = True
+            if not self._audio_dead_warned:
+                self._audio_dead_warned = True
+                logger.warning(
+                    f"链路哑音: {len(values)} 块音频的 RMS 恒为 {values[-1]:.6f} "
+                    f"(极差 {spread:.2e} <= {self.dead_audio_rms_spread:.2e})。"
+                    f"节点在发帧但没有声音，静噪不再打开 / "
+                    f"Muted link: RMS constant at {values[-1]:.6f} across {len(values)} "
+                    f"blocks; node sends frames but no audio, squelch will not open"
+                )
+        elif not dead:
+            self._audio_dead = False
+            self._audio_alive_confirmed = True
+
     def _update_smeter_floor(self, now: float, smeter: float):
         """更新滚动 S-meter 底噪 (窗口内的低百分位)。"""
         self._smeter_samples.append((now, smeter))
@@ -490,6 +580,22 @@ class SquelchDetector:
             return None
         return self._smeter_floor + min(self.smeter_close_margin_db,
                                         self.smeter_open_margin_db - 0.5)
+
+    @property
+    def audio_dead(self) -> bool:
+        """
+        Node is sending frames but no audio (constant RMS across the whole window).
+        节点在发帧但没有音频 (整个窗口内 RMS 恒定)。
+        """
+        return self._audio_dead
+
+    @property
+    def audio_alive_confirmed(self) -> bool:
+        """
+        The link has been seen delivering genuinely varying audio at least once.
+        这条链路至少有一次被确认送出了真正有起伏的音频。
+        """
+        return self._audio_alive_confirmed
 
     @property
     def warming_up(self) -> bool:
@@ -573,6 +679,9 @@ class SquelchDetector:
             "smeter_close_margin_db": self.smeter_close_margin_db,
             "smeter_samples": len(self._smeter_samples),
             "warming_up": self.warming_up,
+            "audio_dead": self._audio_dead,
+            "audio_alive_confirmed": self._audio_alive_confirmed,
+            "audio_samples": len(self._audio_samples),
             "threshold_below_floor": self.threshold_below_floor,
             "stuck_open": self._stuck_open,
             "forced_closes": self._forced_closes,

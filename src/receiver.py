@@ -210,6 +210,14 @@ class SignalReceiver:
                 else:
                     consecutive_failures += 1
 
+                # 哑音节点不该走退避重试: 它连得上、延迟低、帧也照发，再连一百次
+                # 还是同样的一串零。直接顶满失败计数，这一轮立刻换节点。
+                # A muted node must not go through the backoff-and-retry path: it connects
+                # fine, has low latency and keeps sending frames, so a hundred more attempts
+                # yield the same zeros. Saturate the counter and switch on this pass.
+                if reason == "audio_dead":
+                    consecutive_failures = MAX_NODE_FAILURES
+
                 if consecutive_failures >= MAX_NODE_FAILURES:
                     alt = self._pick_alternative_node(node, tried_hosts)
                     if alt:
@@ -453,6 +461,16 @@ class SignalReceiver:
                         f"elapsed={elapsed:.0f}s"
                     )
 
+                # 哑音链路: 帧照收但音频恒定，守下去只会录出一串零。
+                # 记进数据库再换节点 —— 不记的话下次启动按延迟又会挑中它。
+                # Muted link: frames keep arriving but the audio never varies, so staying
+                # here only produces files of zeros. Record it before switching, otherwise
+                # the next run picks the same node on latency all over again.
+                if squelch.audio_dead:
+                    self._note_node_audio(host, port, node_name, alive=False)
+                    reason = "audio_dead"
+                    break
+
                 if duration > 0 and elapsed >= duration:
                     logger.info(f"已达到设定的监听时长 ({duration}s)")
                     reason = "duration"
@@ -475,6 +493,11 @@ class SignalReceiver:
                         )
                     reason = "disconnected"
                     break
+
+            # 这条连接确实送出过真实音频，记一笔把它从"哑音"名单里放出来
+            # This leg did deliver real audio -- record it so the node leaves the mute list
+            if squelch.audio_alive_confirmed:
+                self._note_node_audio(host, port, node_name, alive=True)
 
             # 停止并清理。
             # 先让静噪正常收尾，正在录的那段信号才会入库
@@ -512,6 +535,7 @@ class SignalReceiver:
             start_time = time.time()
             freq_idx = 0
             dwell = self.scan_dwell_time
+            audio_ok_noted = False
 
             while self._running:
                 freq = frequencies[freq_idx % len(frequencies)]
@@ -572,6 +596,20 @@ class SignalReceiver:
 
                 if recorder.is_recording:
                     recorder.stop_recording()
+
+                # 和单频率路径同样的哑音判定。这里每个驻留都新建一个静噪器,
+                # 所以判定是按驻留独立做的 —— 30s 驻留够攒满活性窗口。
+                # Same mute check as the single-frequency path. A fresh detector is built per
+                # dwell here, so the verdict is per-dwell; a 30 s dwell fills the window.
+                if squelch.audio_dead:
+                    self._note_node_audio(host, port, node_name, alive=False)
+                    reason = "audio_dead"
+                    break
+                if squelch.audio_alive_confirmed and not audio_ok_noted:
+                    # 一条连接只记一次，别让每 30s 一轮的驻留把计数刷上天
+                    # Once per connection, so a dwell every 30 s does not inflate the tally
+                    audio_ok_noted = True
+                    self._note_node_audio(host, port, node_name, alive=True)
 
                 freq_idx += 1
 
@@ -661,6 +699,7 @@ class SignalReceiver:
         available = set()
         latency = {}
         quality = {}
+        audio_health = {}
         try:
             for n in self.db.get_available_nodes():
                 available.add(n["host"])
@@ -670,12 +709,17 @@ class SignalReceiver:
         except Exception:
             # 数据库读不出来不算错，退化成按配置顺序挑
             pass
+        try:
+            audio_health = self.db.get_node_audio_health()
+        except Exception:
+            # 老库还没补上这几列时照常工作 / older databases lack these columns
+            pass
 
         def rank(n):
             host = n["host"]
             stat = quality.get(host) or {}
             return (
-                node_quality_tier(host, quality),
+                node_quality_tier(host, quality, audio_health),
                 -(stat.get("useful") or 0),
                 0 if host in available else 1,
                 latency.get(host, float("inf")),
@@ -712,6 +756,28 @@ class SignalReceiver:
     def stop(self):
         """停止接收。"""
         self._running = False
+
+    def _note_node_audio(self, host: str, port: int, node_name: str, alive: bool):
+        """
+        Persist one audio-liveness observation for a node.
+        把一次节点音频活性观测写进数据库。
+
+        Failure here must never take the monitor down: this is bookkeeping that improves the
+        next node choice, not something the current session depends on.
+        这里失败绝不能拖垮监听: 它只是为了让下次选节点更准的记账，
+        当前这次监听并不依赖它。
+        """
+        try:
+            self.db.record_node_audio(host, port, alive=alive)
+        except Exception as e:
+            logger.debug(f"记录节点音频活性失败 / could not record audio liveness: {e}")
+            return
+
+        if not alive:
+            logger.warning(
+                f"节点 {node_name} 只发帧不出声，已记录并将换用别的节点 / "
+                f"node sends frames but no audio; recorded, switching away"
+            )
 
     def _report_status(self, message: str):
         """输出状态信息。"""

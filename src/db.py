@@ -111,6 +111,18 @@ class Database:
             )
         """)
 
+        # Node table increments: audio liveness tally. A node can be reachable, fast and
+        # still deliver nothing but digital silence -- latency and handshake cannot see that,
+        # so it has to be remembered across runs or the same node gets picked again.
+        # 节点表的增量字段: 音频活性计数。一个节点可以连得上、延迟很低，
+        # 却只送数字静音 —— 延迟和握手都看不出来，所以必须跨进程记住，
+        # 否则下次还会挑中同一个。
+        self._migrate_columns(cursor, "nodes", {
+            "audio_dead_checks": "INTEGER DEFAULT 0",
+            "audio_ok_checks": "INTEGER DEFAULT 0",
+            "last_audio_check": "TEXT",
+        })
+
         # 分析表的增量字段 (老数据库直接补列，不丢历史数据)
         self._migrate_columns(cursor, "analysis", {
             "modulation_confidence": "REAL",
@@ -534,6 +546,55 @@ class Database:
         """, (min_snr_db,))
         return {
             row["host"]: {"total": row["total"], "useful": row["useful"] or 0}
+            for row in cursor.fetchall()
+        }
+
+    def record_node_audio(self, host: str, port: int, alive: bool):
+        """
+        Record one observation of whether a node actually delivered audio.
+
+        Called once per connection leg by the receiver. Kept as two counters rather than a
+        single flag so a node that glitched once is not condemned forever -- see
+        node_manager.node_quality_tier for how they are read.
+
+        记录一次"该节点到底出没出音频"的观测。
+
+        由接收器每条连接调用一次。用两个计数器而不是一个标志位，
+        是为了不让偶尔抽风一次的节点被永久判死 ——
+        怎么读见 node_manager.node_quality_tier。
+
+        Args:
+            host: 节点地址 / node address
+            port: 端口 / port
+            alive: True = 收到了真实起伏的音频 / genuinely varying audio was received
+        """
+        column = "audio_ok_checks" if alive else "audio_dead_checks"
+        with self._lock:
+            self.conn.execute(f"""
+                UPDATE nodes
+                   SET {column} = COALESCE({column}, 0) + 1,
+                       last_audio_check = ?
+                 WHERE host = ? AND port = ?
+            """, (datetime.now(timezone.utc).isoformat(), host, port))
+            self.conn.commit()
+
+    def get_node_audio_health(self) -> Dict[str, Dict]:
+        """
+        Per-node audio liveness tally.
+        按节点统计音频活性。
+
+        Returns:
+            {node_host: {"dead": 哑音次数 / mute observations,
+                         "ok": 正常次数 / live observations}}
+        """
+        cursor = self.conn.execute("""
+            SELECT host,
+                   COALESCE(audio_dead_checks, 0) AS dead,
+                   COALESCE(audio_ok_checks, 0)   AS ok
+              FROM nodes
+        """)
+        return {
+            row["host"]: {"dead": row["dead"], "ok": row["ok"]}
             for row in cursor.fetchall()
         }
 

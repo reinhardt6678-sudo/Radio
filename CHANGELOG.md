@@ -4,6 +4,111 @@
 > of that release.
 > 英文在前、中文在后。每条记录里的测试数量是该版本发布时的数量。
 
+## v1.4.3 (2026-08-31)
+
+A node can pass every check the monitor makes and still be **completely silent**.
+
+Starting a routine background listen on 8992 kHz, node selection picked K1VL Vermont — lowest
+latency of the seven at 552 ms, clean handshake, no reason to doubt it. Twelve seconds after
+connecting it started producing "signals", four of them in the first forty seconds. Every one
+was digital silence:
+
+```
+20260831_202730_8992.0kHz_K1VL.wav | 60928 samples | min 0 max 0 | nonzero 0
+```
+
+Audio frames were arriving normally the whole time — `frames=704 (dropped=0)`. A link check
+across all seven nodes confirmed it: K1VL's audio RMS had **minimum, median and maximum all
+equal to 0.00003**, one constant value, while its S-meter read a perfectly healthy
+−101.7 ~ −86.9 dBm.
+
+That combination is what defeats the current design. Since v1.4.0 the squelch criterion is the
+S-meter, chosen precisely because it is measured *before* the node's audio AGC and therefore
+survives a flattened audio level. But it means the squelch never looks at the audio at all — so
+a node with a live receiver and a dead audio path triggers happily, and the recorder writes
+files of zeros that the analyser then files in the database as `NOISE`.
+
+Node selection could not catch it either. [v1.4.2](#v142-2026-08-21) added quality tiers so
+latency stops deciding on its own, but those tiers are built from *received signals*, and a node
+nobody has listened to yet has no history — K1VL sat in the "unknown, give it a chance" tier and
+won on latency.
+
+节点可以通过监听所做的每一项检查，然后**一声不出**。
+
+在 8992 kHz 上例行开一个后台监听，节点择优挑中了 K1VL Vermont —— 七个节点里延迟最低
+（552 ms）、握手干净、没有任何可疑之处。连上 12 秒后它开始产出"信号"，头 40 秒出了四条。
+每一条都是数字静音（见上面的样本统计）。
+
+而音频帧全程都在正常到达 —— `frames=704 (dropped=0)`。对七个节点逐一做链路体检确认了：
+K1VL 的音频 RMS **最小值、中位数、最大值全部等于 0.00003**，一个恒定值，
+而它的 S-meter 读数完全健康，−101.7 ~ −86.9 dBm。
+
+正是这个组合击穿了现有设计。从 v1.4.0 起静噪判据换成了 S-meter，选它恰恰是因为
+它在节点音频 AGC **之前**测量，所以音频电平被压平时它依然有效。但这也意味着静噪
+根本不看音频 —— 于是接收机活着、音频通路死掉的节点照样触发，录音器写出一串零，
+分析器再把它当成 `NOISE` 记进数据库。
+
+节点择优同样拦不住。[v1.4.2](#v142-2026-08-21) 加了质量分档，让延迟不再单独说了算，
+但那些分档是从**已收到的信号**建立的，而没人听过的节点没有历史 ——
+K1VL 落在"还不知道，给它个机会"那一档，然后靠延迟胜出。
+
+### ✨ Changes / 改动
+
+- **The squelch now refuses to open on a muted link.** A rolling window tracks per-block audio
+  RMS; when its peak-to-peak spread stays at or below `dead_audio_rms_spread` (default `1e-6`)
+  across at least `dead_audio_min_blocks` blocks, the link is declared muted and the squelch
+  stays shut however far the S-meter rises. Real audio always carries thermal noise, so a
+  spread of exactly zero is conclusive rather than heuristic — the same window measured on a
+  working node spans 0.0076 ~ 0.0172, four orders of magnitude above the threshold. Set
+  `dead_audio_min_blocks: 0` to disable the guard.
+
+  **静噪不再在哑音链路上打开。** 用滚动窗口跟踪逐块音频 RMS；当极差在至少
+  `dead_audio_min_blocks` 块内始终小于等于 `dead_audio_rms_spread`（默认 `1e-6`）时，
+  判定链路哑音，此后 S-meter 抬得再高静噪也不开。真实音频总带着热噪声，
+  所以"极差恰好为零"是确凿判据而非启发式猜测 —— 同样的窗口在正常节点上实测
+  0.0076 ~ 0.0172，比阈值高四个数量级。写 `dead_audio_min_blocks: 0` 可关闭该判定。
+
+- **Muted nodes are remembered across runs and ranked last.** Two counters on the `nodes` table
+  (`audio_dead_checks` / `audio_ok_checks`, added by the usual automatic column migration)
+  record what each node actually delivered. A node observed muted and never heard live drops to
+  a new worst tier, below even "proven deaf": a deaf node at least produces audio, so the
+  frequency may simply have been quiet, whereas a muted node can never produce a signal. One
+  live observation clears it, so a single glitch does not condemn a node forever.
+
+  **哑音节点跨进程记住，并排到最后。** `nodes` 表上两个计数器
+  （`audio_dead_checks` / `audio_ok_checks`，走既有的自动补列迁移）记录每个节点实际
+  送出了什么。被观测到哑音且从未收到过真音频的节点掉进一个新的最差档，
+  比"证明听不见"还靠后：聋节点至少还在出音频，可能只是那个频率当时没动静，
+  而哑音节点永远不可能产出信号。收到一次真音频即解除，一次抽风不会把节点永久判死。
+
+- **A muted leg switches node immediately instead of backing off.** Reconnecting is pointless
+  in a way it is not for a dropped connection — the node connects fine, has low latency and
+  keeps streaming, so attempt 101 returns the same zeros as attempt 1.
+
+  **判定哑音后立刻换节点，不走退避重试。** 这里的重试和普通掉线不同，是彻底没有意义的
+  —— 节点连得上、延迟低、帧照发，第 101 次和第 1 次拿到的是同一串零。
+
+- **`diagnose_rms.py` now names this failure.** It always printed minimum, median and maximum
+  RMS; it never said out loud that three identical values mean the node is muted. Previously it
+  fell through to the threshold advice and suggested `open_threshold=0.0001` — pointing at the
+  threshold when the threshold was never the problem.
+
+  **`diagnose_rms.py` 现在把这种坏法说破。** 它一直在打印 RMS 的最小/中位/最大值，
+  却从没说出"三个数一样 = 节点是哑的"。此前它会落到阈值建议那一支，
+  给出 `open_threshold=0.0001` —— 把人往阈值方向带，而阈值从来不是问题所在。
+
+### Notes / 说明
+
+Existing databases gain the two columns automatically on first open; no migration step is
+needed and no history is lost. Recordings already made by a muted node are unaffected by this
+change — they are still all-zero files with `NOISE` rows, and still need cleaning up.
+
+老数据库首次打开时自动补上这两列，无需迁移步骤，不丢历史数据。此前由哑音节点录下的
+文件不受本次改动影响 —— 它们依然是全零文件加 `NOISE` 记录，仍然需要清理。
+
+Tests: 230 passed (208 before this release).
+测试：230 通过（本次发布前为 208）。
+
 ## v1.4.2 (2026-08-21)
 
 The reconnect logic added in v1.4.1 kept the process alive — and then it sat on a node that

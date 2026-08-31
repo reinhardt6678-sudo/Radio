@@ -44,6 +44,12 @@ DEFAULT_FREQ = 11175.0
 DEFAULT_MODE = "USB"
 DEFAULT_DURATION = 30.0
 
+# Peak-to-peak RMS spread at or below which the link counts as muted.
+# Must match squelch.dead_audio_rms_spread, or the doctor and the monitor disagree.
+# 判定链路哑音的 RMS 极差上限。
+# 必须和 squelch.dead_audio_rms_spread 一致，否则体检和监听会各说各话。
+DEAD_AUDIO_RMS_SPREAD = 1e-6
+
 
 def load_yaml(path: str) -> dict:
     p = Path(path)
@@ -136,6 +142,26 @@ def report(result: dict, open_th: float, close_th: float,
         print("        - 节点通道被占满 / 对匿名用户有时长限制")
         print("        - 出口把 8073 之类的端口挡掉了 (KiwiSDR 走 ws://，不是 443)")
         print("        - 该节点当前不可用，换一个再试: python diagnose_rms.py --all-nodes")
+        return False
+
+    # --- 情况 1b: 有帧但没有声音 ---
+    # 这个脚本本来就量出了 min/median/max，只是从没说破"三个数一样 = 节点是哑的"。
+    # K1VL Vermont 实测: 470 帧、丢 0 帧、S-meter 正常，而 RMS 三个统计量全是 0.00003。
+    # --- Case 1b: frames but no sound ---
+    # The numbers were always printed; what was missing was saying out loud that identical
+    # min/median/max means the node is muted. Measured on K1VL Vermont: 470 frames,
+    # 0 dropped, healthy S-meter, and all three RMS statistics equal to 0.00003.
+    rms_spread = float(rms.max() - rms.min())
+    if rms_spread <= DEAD_AUDIO_RMS_SPREAD:
+        print(f"\n  [X] 收到了 {frames} 个音频帧，但每一块的 RMS 都是同一个值 "
+              f"{rms.max():.6f} (极差 {rms_spread:.2e})。")
+        print("      这个节点在发帧但不出声，录下来的会是一整串零样本。")
+        print("      和阈值、频率都没有关系，换一个节点: "
+              "python diagnose_rms.py --all-nodes")
+        print(f"\n  [X] Received {frames} audio frames, but every block has the same RMS "
+              f"{rms.max():.6f} (spread {rms_spread:.2e}).")
+        print("      This node sends frames without audio; recordings would be all zeros.")
+        print("      Unrelated to threshold or frequency -- try another node.")
         return False
 
     noise_floor = float(np.percentile(rms, 20))

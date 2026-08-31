@@ -18,10 +18,17 @@ from src.analyzer import SignalAnalyzer
 
 
 def _det(**kw):
+    # dead_audio_min_blocks=0 关掉哑音判定: 这些用例喂的是恒定音频块 (常常全 0),
+    # 那正是哑音判据要拦的形状。判据本身另有 TestDeadAudioGuard 覆盖，
+    # 这里显式关掉，免得两个无关的机制耦合在一起。
+    # dead_audio_min_blocks=0 switches the mute guard off: these cases feed constant audio
+    # blocks (often all zeros), which is exactly the shape the guard rejects. The guard has
+    # its own coverage in TestDeadAudioGuard; disabling it here keeps two unrelated
+    # mechanisms from becoming coupled.
     d = {"mode": MODE_SMETER, "tail_time": 0.0, "pre_roll_seconds": 0.1,
          "sample_rate": 1000, "smeter_open_margin_db": 14.0,
          "smeter_close_margin_db": 10.0, "smeter_floor_min_samples": 5,
-         "smeter_floor_window_seconds": 600.0}
+         "smeter_floor_window_seconds": 600.0, "dead_audio_min_blocks": 0}
     d.update(kw)
     return SquelchDetector(**d)
 
@@ -258,3 +265,108 @@ class TestSpeechScorePersisted:
         assert got["speech_score"] == pytest.approx(0.77)
         assert got["syllabic_ratio"] == pytest.approx(0.42)
         assert got["passband_tilt_db"] == pytest.approx(3.1)
+
+
+class TestDeadAudioGuard:
+    """
+    Nodes that send frames without audio.
+    只发帧、不出声的节点。
+
+    Reproduces K1VL Vermont, 2026-08-31: handshake fine, 470 frames, 0 dropped, S-meter
+    -101.7 ~ -86.9 dBm, and every audio sample the same constant 0.00003. In smeter mode the
+    squelch looks only at RF level, so it opened every few seconds and filed all-zero
+    recordings in the database as signals.
+
+    复现 K1VL Vermont 2026-08-31 的现场: 握手正常、470 帧、丢 0 帧、
+    S-meter -101.7 ~ -86.9 dBm, 而每个音频采样都是同一个常数 0.00003。
+    smeter 模式只看射频电平, 于是每隔几秒就开一次静噪, 把全零录音当成信号写进库。
+    """
+
+    @staticmethod
+    def _live(**kw):
+        d = {"mode": MODE_SMETER, "tail_time": 0.0, "pre_roll_seconds": 0.1,
+             "sample_rate": 1000, "smeter_open_margin_db": 14.0,
+             "smeter_close_margin_db": 10.0, "smeter_floor_min_samples": 5,
+             "smeter_floor_window_seconds": 600.0,
+             "dead_audio_min_blocks": 10, "dead_audio_window_seconds": 600.0}
+        d.update(kw)
+        return SquelchDetector(**d)
+
+    @staticmethod
+    def _feed(det, blocks, dbm):
+        for b in blocks:
+            det._last_smeter_calc = 0.0
+            det.process(b, dbm)
+
+    def test_constant_audio_is_flagged_dead(self):
+        """恒定音频 = 哑音链路 / constant audio means a muted link."""
+        det = self._live()
+        const = np.full(100, 0.00003, dtype=np.float32)
+        self._feed(det, [const] * 20, -110.0)
+        assert det.audio_dead is True
+        assert det.audio_alive_confirmed is False
+
+    def test_all_zero_audio_is_flagged_dead(self):
+        det = self._live()
+        self._feed(det, [np.zeros(100, dtype=np.float32)] * 20, -110.0)
+        assert det.audio_dead is True
+
+    def test_muted_node_never_opens_squelch(self):
+        """
+        判据的全部意义: S-meter 冲得再高, 没有音频就不许开。
+        The whole point: however far the S-meter rises, no audio means no open.
+        """
+        det = self._live()
+        const = np.full(100, 0.00003, dtype=np.float32)
+        self._feed(det, [const] * 20, -110.0)        # 底噪建立 + 判定哑音
+        assert det.audio_dead is True
+
+        det._last_smeter_calc = 0.0
+        det.process(const, -80.0)                    # 底噪 +30 dB，换正常链路早开了
+        assert det.is_open is False
+
+    def test_live_audio_opens_normally(self):
+        """有起伏的音频不受影响 / audio that actually varies is untouched."""
+        rng = np.random.default_rng(7)
+        det = self._live()
+        noise = [rng.normal(0, 0.01, 100).astype(np.float32) for _ in range(20)]
+        self._feed(det, noise, -110.0)
+        assert det.audio_dead is False
+        assert det.audio_alive_confirmed is True
+
+        det._last_smeter_calc = 0.0
+        det.process(rng.normal(0, 0.01, 100).astype(np.float32), -80.0)
+        assert det.is_open is True
+
+    def test_verdict_withheld_until_enough_blocks(self):
+        """样本不够就不下判断，别把刚连上的几百毫秒当成哑音。"""
+        det = self._live(dead_audio_min_blocks=50)
+        self._feed(det, [np.zeros(100, dtype=np.float32)] * 20, -110.0)
+        assert det.audio_dead is False
+
+    def test_recovery_clears_the_flag(self):
+        """
+        哑音之后又出声就应当放行 —— 否则一次抽风会把节点永久判死。
+        Audio coming back must clear the flag, or one glitch condemns the node forever.
+        """
+        rng = np.random.default_rng(11)
+        det = self._live()
+        self._feed(det, [np.zeros(100, dtype=np.float32)] * 20, -110.0)
+        assert det.audio_dead is True
+
+        self._feed(det, [rng.normal(0, 0.01, 100).astype(np.float32)
+                         for _ in range(20)], -110.0)
+        assert det.audio_dead is False
+        assert det.audio_alive_confirmed is True
+
+    def test_guard_can_be_disabled(self):
+        det = self._live(dead_audio_min_blocks=0)
+        self._feed(det, [np.zeros(100, dtype=np.float32)] * 30, -110.0)
+        assert det.audio_dead is False
+
+    def test_status_reports_liveness(self):
+        det = self._live()
+        self._feed(det, [np.zeros(100, dtype=np.float32)] * 20, -110.0)
+        status = det.get_status()
+        assert status["audio_dead"] is True
+        assert status["audio_alive_confirmed"] is False

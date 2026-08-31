@@ -1,4 +1,4 @@
-# MilRadio manual (v1.4.2) / MilRadio 使用说明（v1.4.2）
+# MilRadio manual (v1.4.3) / MilRadio 使用说明（v1.4.3）
 
 > Military radio signal reception and metadata analysis — receives HF signals over the worldwide
 > network of public KiwiSDR receivers, records on squelch, analyses the spectrum, classifies
@@ -292,6 +292,17 @@ squelch:
                                 # 关闭阈值，必须 < 打开余量，形成滞后
   smeter_floor_window_seconds: 600
   smeter_floor_percentile: 10
+
+  # --- dead-audio guard (all modes) / 哑音链路保护（所有模式）---
+  # Some nodes keep sending frames with a healthy S-meter while every audio sample is the
+  # same constant. In smeter mode the squelch only looks at RF level, so such a node would
+  # trigger and record files of zeros. Judged by RMS spread: real audio always jitters.
+  # 有些节点帧照发、S-meter 也健康，但每个音频采样都是同一个常数。smeter 模式只看
+  # 射频电平，这种节点会照样触发并录出一串零。按 RMS 极差判定：真实音频总在抖。
+  dead_audio_window_seconds: 30.0
+  dead_audio_min_blocks: 50       # 0 disables the guard / 写 0 则关闭该判定
+  dead_audio_rms_spread: 0.000001 # Spread at or below this counts as muted
+                                  # 极差小于等于此值即判为哑音
 
   # --- adaptive mode / adaptive 模式 ---
   open_margin_db: 6.0     # dB above the measured floor to open (6 dB = floor x 2)

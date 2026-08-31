@@ -21,21 +21,38 @@ NODE_QUALITY_MIN_SNR_DB = 6.0   # 带内 SNR 到这个数才算"真听见了"
 NODE_QUALITY_MIN_SAMPLES = 30   # 攒够这么多条记录，才敢断定一个节点听不见
 
 
-def node_quality_tier(host: str, quality: dict) -> int:
+def node_quality_tier(host: str, quality: dict,
+                      audio_health: dict = None) -> int:
     """
+    Rank a node from its history; lower is better.
     按历史记录给节点分档，数字越小越优先。
 
-    0 = 在这个节点上真收到过东西
-    1 = 记录太少，还不知道
-    2 = 记录够多了但一条真信号都没有 —— 有实据说明它听不见
+    0 = something was genuinely received here / 在这个节点上真收到过东西
+    1 = too few records to tell / 记录太少，还不知道
+    2 = enough records but not one real signal / 记录够多了但一条真信号都没有
+    3 = observed sending frames without audio / 观测到它只发帧不出声
 
+    "Unknown" outranks "proven deaf": an untried node still has a chance, one that produced
+    nothing in 85 attempts should not be revisited.
     "没数据"要排在"有数据证明它不行"前面: 没试过的还有机会，
     试了 85 次 0 条的就别再回去了。
 
+    Tier 3 sits below even that. A deaf node at least delivers audio, so the frequency might
+    simply have been quiet; a muted node cannot ever produce a signal, and every recording it
+    triggers is a file of zeros. It leaves tier 3 as soon as live audio is seen once.
+    第 3 档比"聋"还靠后。聋节点至少还在出音频，可能只是那个频率当时没动静;
+    哑音节点则永远不可能产出信号，它触发的每一条录音都是一串零。
+    只要有一次收到真实音频，它立刻脱离第 3 档。
+
     Args:
-        host: 节点地址
-        quality: db.get_node_signal_quality() 的返回值
+        host: 节点地址 / node address
+        quality: db.get_node_signal_quality() 的返回值 / its return value
+        audio_health: db.get_node_audio_health() 的返回值 / its return value
     """
+    audio = (audio_health or {}).get(host)
+    if audio and audio.get("dead", 0) > 0 and audio.get("ok", 0) == 0:
+        return 3
+
     stat = (quality or {}).get(host)
     if not stat:
         return 1
@@ -149,19 +166,31 @@ class NodeManager:
 
         先看历史上在这个节点收到过真信号没有，同档之内才比延迟 ——
         反过来按延迟挑的话，很容易挑中一个网络很快但压根听不见目标频率的节点。
+
+        Nodes known to send frames without audio are ranked last: latency and the handshake
+        both look perfect on such a node, which is exactly how the fastest node in the list
+        gets picked and then records nothing but zeros.
+        已知只发帧不出声的节点排在最后: 这种节点的延迟和握手都完美,
+        正是这样才会被当成"最快的节点"选中，然后录一整串零。
         """
         if not self._available_nodes:
             return None
 
         quality = {}
+        audio_health = {}
         try:
             quality = self.db.get_node_signal_quality(NODE_QUALITY_MIN_SNR_DB)
         except Exception:
             # 读不出历史就退化成按延迟挑，跟以前一样
             pass
+        try:
+            audio_health = self.db.get_node_audio_health()
+        except Exception:
+            # 老库还没补上这几列时照常工作 / older databases lack these columns
+            pass
 
         return min(self._available_nodes, key=lambda n: (
-            node_quality_tier(n["host"], quality),
+            node_quality_tier(n["host"], quality, audio_health),
             -((quality.get(n["host"]) or {}).get("useful") or 0),
             n.get("latency_ms", 9999),
         ))

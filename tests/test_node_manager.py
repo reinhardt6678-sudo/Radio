@@ -94,3 +94,71 @@ class TestGetBestNode:
 
         mgr.db.get_node_signal_quality = boom
         assert mgr.get_best_node()["host"] == "fast.example"
+
+
+class TestMutedNodeTier:
+    """
+    Nodes that send frames without audio rank below even a proven-deaf node.
+    只发帧不出声的节点，排得比"证明听不见"的还靠后。
+
+    K1VL Vermont, 2026-08-31: lowest latency of the seven (552 ms), clean handshake, no
+    history at all -- so it landed in tier 1 and won on latency, then recorded five all-zero
+    files. Latency and the handshake cannot see muteness; only the audio tally can.
+
+    K1VL Vermont 2026-08-31: 七个节点里延迟最低 (552 ms)、握手干净、毫无历史记录 ——
+    于是落进第 1 档并靠延迟胜出，接着录了五个全零文件。
+    延迟和握手都看不见"哑音"，只有音频计数能看见。
+    """
+
+    def test_muted_node_is_worst_tier(self):
+        health = {"h": {"dead": 1, "ok": 0}}
+        assert node_quality_tier("h", {}, health) == 3
+
+    def test_muted_ranks_below_proven_deaf(self):
+        deaf = node_quality_tier("d", {"d": {"total": 500, "useful": 0}})
+        muted = node_quality_tier("m", {}, {"m": {"dead": 3, "ok": 0}})
+        assert deaf < muted
+
+    def test_one_live_observation_clears_it(self):
+        """收到过一次真音频就不再算哑音 —— 免得偶发抽风把节点永久判死。"""
+        health = {"h": {"dead": 5, "ok": 1}}
+        assert node_quality_tier("h", {}, health) == 1
+
+    def test_good_history_survives_a_mute_observation(self):
+        health = {"h": {"dead": 2, "ok": 4}}
+        assert node_quality_tier("h", {"h": {"total": 100, "useful": 9}}, health) == 0
+
+    def test_absent_audio_health_is_backwards_compatible(self):
+        """老库没有这几列时，分档退回原来的三档。"""
+        assert node_quality_tier("h", {"h": {"total": 100, "useful": 3}}) == 0
+        assert node_quality_tier("h", {}, None) == 1
+        assert node_quality_tier("h", {}, {}) == 1
+
+
+class TestNodeAudioHealthStore:
+    """音频活性计数的读写 / persisting the audio-liveness tally."""
+
+    @pytest.fixture
+    def db(self, tmp_path):
+        d = Database(str(tmp_path / "t.db"))
+        d.upsert_node(host="a.example", port=8073, name="A", location="",
+                      lat=None, lon=None, is_available=True, latency_ms=10.0)
+        yield d
+
+    def test_starts_empty(self, db):
+        assert db.get_node_audio_health()["a.example"] == {"dead": 0, "ok": 0}
+
+    def test_records_dead_and_ok(self, db):
+        db.record_node_audio("a.example", 8073, alive=False)
+        db.record_node_audio("a.example", 8073, alive=False)
+        db.record_node_audio("a.example", 8073, alive=True)
+        assert db.get_node_audio_health()["a.example"] == {"dead": 2, "ok": 1}
+
+    def test_unknown_node_is_a_noop(self, db):
+        db.record_node_audio("nope.example", 8073, alive=False)
+        assert "nope.example" not in db.get_node_audio_health()
+
+    def test_feeds_the_tier_function(self, db):
+        db.record_node_audio("a.example", 8073, alive=False)
+        health = db.get_node_audio_health()
+        assert node_quality_tier("a.example", {}, health) == 3

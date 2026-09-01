@@ -14,7 +14,7 @@ from typing import List, Dict, Optional, Callable
 
 from .kiwi_client import KiwiSDRClient, test_connection
 from .squelch import SquelchDetector
-from .recorder import AudioRecorder
+from .recorder import AudioRecorder, discard_recording
 from .analyzer import SignalAnalyzer
 from .db import Database
 from .node_manager import (
@@ -99,6 +99,11 @@ class SignalReceiver:
         self._running = False
         self._session_id: Optional[int] = None
         self._total_signals = 0
+        # Segments the noise gate kept out of the database. Counted separately so a
+        # quiet session and a session drowning in wideband noise do not look alike.
+        # 被噪声闸门挡在库外的段数。单独计数，好让"真的没东西"和"全是宽带噪声"
+        # 这两种情况在日志里长得不一样。
+        self._discarded_signals = 0
         self._status_callback: Optional[Callable] = None
         self._left_preferred_at: Optional[float] = None  # 何时被迫离开首选节点
         self._preferred_node: Optional[dict] = None      # 首选节点，回访探测要用
@@ -119,6 +124,7 @@ class SignalReceiver:
         self._status_callback = status_callback
         self._running = True
         self._total_signals = 0
+        self._discarded_signals = 0
 
         host = node["host"]
         port = node.get("port", 8073)
@@ -385,6 +391,16 @@ class SignalReceiver:
             def on_signal_close(signal_duration, peak_rms, avg_rms):
                 """信号结束回调。"""
                 rec_info = recorder.stop_recording()
+
+                # 先分析再决定入不入库 —— 顺序不能反。
+                # 传入解调模式: SNR 和调制判定都要按对应通带来算
+                # Analyse before deciding whether to file it -- the order matters.
+                analysis = self.analyzer.analyze_buffer(
+                    signal_audio_buffer, self.sample_rate, mode=freq.mode
+                )
+                if self._reject_as_noise(analysis, rec_info, freq.freq_khz):
+                    return
+
                 self._total_signals += 1
 
                 # 保存信号记录到数据库
@@ -402,13 +418,7 @@ class SignalReceiver:
                     description=freq.description,
                     network=freq.network,
                 )
-
-                # 对录制的信号做频谱分析（使用统一方法避免重复代码）
-                # 传入解调模式: SNR 和调制判定都要按对应通带来算
-                self.analyzer.analyze_and_save(
-                    self.db, signal_id, signal_audio_buffer, self.sample_rate,
-                    mode=freq.mode
-                )
+                self.analyzer.save_analysis_result(self.db, signal_id, analysis)
 
                 self._report_status(
                     f"[SIGNAL-OFF] #{self._total_signals}: "
@@ -564,6 +574,14 @@ class SignalReceiver:
 
                     def on_close(dur, peak, avg):
                         rec_info = r.stop_recording()
+                        # 和单频率路径同一道噪声闸门 / same noise gate as the
+                        # single-frequency path above
+                        analysis = self.analyzer.analyze_buffer(
+                            buf, self.sample_rate, mode=f.mode
+                        )
+                        if self._reject_as_noise(analysis, rec_info, f.freq_khz):
+                            return
+
                         self._total_signals += 1
                         sig_id = self.db.record_signal(
                             session_id=self._session_id,
@@ -574,9 +592,7 @@ class SignalReceiver:
                             recording_path=rec_info["path"] if rec_info else None,
                             description=f.description, network=f.network,
                         )
-                        self.analyzer.analyze_and_save(
-                            self.db, sig_id, buf, self.sample_rate, mode=f.mode
-                        )
+                        self.analyzer.save_analysis_result(self.db, sig_id, analysis)
 
                     return on_open, on_audio, on_close
 
@@ -778,6 +794,38 @@ class SignalReceiver:
                 f"节点 {node_name} 只发帧不出声，已记录并将换用别的节点 / "
                 f"node sends frames but no audio; recorded, switching away"
             )
+
+    def _reject_as_noise(self, analysis: Optional[Dict],
+                         rec_info: Optional[dict],
+                         freq_khz: float) -> bool:
+        """
+        Apply the noise gate to one finished segment.
+        对一段收完的音频执行噪声闸门。
+
+        The classifier was always right about these -- 274 of 274 on 4724 kHz were
+        labelled NOISE -- it just used to run after db.record_signal(), so its
+        verdict changed nothing. Here it runs first and gets to withhold the row.
+        分类器对这些段一直判得对 —— 4724 kHz 上 274 条判出 274 条 NOISE ——
+        只是它过去跑在 db.record_signal() 之后，判对了也没用。
+        现在它跑在前面，可以真的拦下这条记录。
+
+        Returns:
+            True 表示已丢弃 (调用方应立即返回)，False 表示照常入库
+        """
+        reason = self.analyzer.noise_discard_reason(analysis)
+        if not reason:
+            return False
+
+        self._discarded_signals += 1
+        deleted = discard_recording(rec_info)
+        self._report_status(
+            f"[NOISE-DISCARD] #{self._discarded_signals} {freq_khz:.1f} kHz: "
+            f"{reason} — not filed"
+            f"{', recording deleted' if deleted else ''} "
+            f"/ 判为噪声，未入库"
+            f"{'，录音已删除' if deleted else ''}"
+        )
+        return True
 
     def _report_status(self, message: str):
         """输出状态信息。"""

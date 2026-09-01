@@ -315,6 +315,55 @@ analysis:
   # 调制判定的最低置信度, 低于此值输出 UNKNOWN 而不是硬猜
   min_confidence: 0.35
 
+  # --- noise gate at ingest / 入库噪声闸门 ---
+  # The classifier has always judged wideband noise correctly, but it used to run *after*
+  # db.record_signal(), so its verdict changed nothing: the row was already written and the
+  # WAV already on disk. Measured on 4724 kHz, 2026-09-01: one hour produced 274 recordings,
+  # all 274 classified NOISE at in-band SNR -9.2 ~ +2.3 dB, for a 68% recording duty cycle.
+  # The four real exchanges that night sat at +4.5 ~ +17.7 dB. Running the analysis first and
+  # letting it withhold the row needs no new signal processing -- it only connects a verdict
+  # that was already correct to the decision it should have been driving.
+  #
+  # 分类器一直都能正确判出宽带噪声, 但它过去跑在 db.record_signal() **之后**,
+  # 所以判对了也没用: 记录已经写了, WAV 也已经落盘。4724 kHz 实测 (2026-09-01):
+  # 一小时录了 274 条, 274 条全判为 NOISE, 带内 SNR 在 -9.2 ~ +2.3 dB, 录音占空比 68%。
+  # 当晚 4 条真通联则在 +4.5 ~ +17.7 dB。把分析挪到前面、让它有权拦下这条记录,
+  # 不需要任何新的信号处理 —— 只是把一个本来就判对了的结论接到它该驱动的决策上。
+  #
+  # Set to false to file everything as before (the verdict is still stored either way).
+  # 写 false 就恢复成以前那样全部入库 (判定结果两种情况下都照常保存)。
+  discard_noise: true
+  # A discarded segment loses both its database row and its WAV: keeping the file without a
+  # row would leave an orphan that nothing points at, which is exactly what makes
+  # clean_recordings.py risky. Either both exist or neither does.
+  # 被丢弃的段会同时失去数据库记录和 WAV 文件: 留下文件却没有记录就成了孤儿文件,
+  # 而这正是 clean_recordings.py 跑起来有风险的原因。要么两个都在, 要么两个都不在。
+  #
+  # Minimum NOISE confidence required before anything is discarded. This is the threshold
+  # that actually binds -- see the note below.
+  # 丢弃所需的最低 NOISE 置信度。实际起作用的是这一个 —— 见下面的说明。
+  discard_noise_min_confidence: 0.8
+  # Only discard below this in-band SNR (dB). Raise it to discard more aggressively; lower it
+  # to be more conservative.
+  # 带内 SNR 低于这个值才允许丢弃 (dB)。调高丢得更狠, 调低更保守。
+  discard_noise_max_snr_db: 0.0
+  #
+  # Both thresholds must be met, and they are deliberately redundant. On the NOISE branch the
+  # confidence is a pure function of SNR:
+  #     confidence = clip(0.5 + (noise_snr_threshold_db - snr) / 12, 0.5, 0.99)
+  # so at the stock settings above the confidence test is the stricter of the two and the real
+  # cut is SNR <= -0.6 dB; the 0 dB SNR test never binds on its own. That sits 5.1 dB below the
+  # weakest real exchange measured (+4.5 dB) and still catches the bulk of the noise bursts
+  # (-9.2 ~ +2.3 dB). Two independent gates mean loosening one alone cannot silently widen the
+  # gate. Anything unanalysable (under 1 second of audio) is always kept.
+  #
+  # 两个阈值都要满足, 而且是刻意冗余的。NOISE 分支的置信度完全由 SNR 推出:
+  #     confidence = clip(0.5 + (noise_snr_threshold_db - snr) / 12, 0.5, 0.99)
+  # 所以在上面的默认参数下, 置信度判据是两者中更严的那个, 真正的切点是 SNR <= -0.6 dB;
+  # 0 dB 那道 SNR 判据自己永远不会先卡住。这个切点比实测最弱的真通联 (+4.5 dB) 还低 5.1 dB,
+  # 同时仍能拦下绝大部分噪声突发 (-9.2 ~ +2.3 dB)。两道独立的闸门意味着单独放宽其中一个
+  # 不会悄悄把口子开大。分析不出来的 (音频不足 1 秒) 一律保留。
+
 # --- Report settings / 报告设置 ---
 report:
   output_dir: "reports"

@@ -84,7 +84,10 @@ class SignalAnalyzer:
                  sample_rate: int = 12000,
                  noise_percentile: float = 20.0,
                  noise_snr_threshold_db: float = 3.0,
-                 min_confidence: float = 0.35):
+                 min_confidence: float = 0.35,
+                 discard_noise: bool = True,
+                 discard_noise_min_confidence: float = 0.8,
+                 discard_noise_max_snr_db: float = 0.0):
         """
         初始化分析器。
 
@@ -96,6 +99,12 @@ class SignalAnalyzer:
             noise_percentile: 带内噪声基底取第几百分位 (对占满通带的信号更稳健)
             noise_snr_threshold_db: 低于该带内 SNR 判定为噪声
             min_confidence: 调制判定的最低置信度，低于此值输出 UNKNOWN
+            discard_noise: drop confidently-NOISE segments instead of filing them
+                           判为噪声且证据充分时直接丢弃，不写库
+            discard_noise_min_confidence: minimum NOISE confidence required to discard
+                                          丢弃所需的最低 NOISE 置信度
+            discard_noise_max_snr_db: only discard below this in-band SNR (dB)
+                                      带内 SNR 低于这个值才允许丢弃 (dB)
         """
         self.fft_size = fft_size
         self.window_type = window_type
@@ -104,6 +113,9 @@ class SignalAnalyzer:
         self.noise_percentile = noise_percentile
         self.noise_snr_threshold_db = noise_snr_threshold_db
         self.min_confidence = min_confidence
+        self.discard_noise = discard_noise
+        self.discard_noise_min_confidence = discard_noise_min_confidence
+        self.discard_noise_max_snr_db = discard_noise_max_snr_db
 
     @classmethod
     def from_config(cls, config: dict) -> "SignalAnalyzer":
@@ -118,20 +130,33 @@ class SignalAnalyzer:
             noise_percentile=ana_cfg.get("noise_percentile", 20.0),
             noise_snr_threshold_db=ana_cfg.get("noise_snr_threshold_db", 3.0),
             min_confidence=ana_cfg.get("min_confidence", 0.35),
+            discard_noise=ana_cfg.get("discard_noise", True),
+            discard_noise_min_confidence=ana_cfg.get(
+                "discard_noise_min_confidence", 0.8),
+            discard_noise_max_snr_db=ana_cfg.get("discard_noise_max_snr_db", 0.0),
         )
 
-    def analyze_and_save(self, db, signal_id: int,
-                         audio_buffer: list, sample_rate: int = None,
-                         mode: str = None):
+    def analyze_buffer(self, audio_buffer: list, sample_rate: int = None,
+                       mode: str = None) -> Optional[Dict]:
         """
-        分析音频缓冲区并保存结果到数据库 (消除重复代码)。
+        Analyse an audio buffer without touching the database.
+        只做分析，不碰数据库。
+
+        Split out of analyze_and_save so the verdict is available *before* the
+        signal row is written: the classifier already labels wideband noise
+        correctly, but it used to run after db.record_signal() and so could not
+        keep anything out of the database.
+        从 analyze_and_save 里拆出来，为的是在写信号记录**之前**就拿到判定结果:
+        分类器本来就能正确判出宽带噪声，但它过去跑在 db.record_signal() 之后，
+        结论没法挡住任何一条记录入库。
 
         Args:
-            db: Database 实例
-            signal_id: 信号 ID
             audio_buffer: 音频块列表 [np.ndarray, ...]
             sample_rate: 采样率，默认使用 self.sample_rate
             mode: 解调模式 (决定通带和语音标签)
+
+        Returns:
+            分析结果字典；音频不足 1 秒或缓冲区为空时返回 None
         """
         sr = sample_rate or self.sample_rate
         if not audio_buffer:
@@ -139,7 +164,73 @@ class SignalAnalyzer:
         all_samples = np.concatenate(audio_buffer)
         if len(all_samples) < sr:  # 至少 1 秒
             return None
-        analysis = self.analyze_samples(all_samples, sr, mode=mode)
+        return self.analyze_samples(all_samples, sr, mode=mode)
+
+    def noise_discard_reason(self, analysis: Optional[Dict]) -> Optional[str]:
+        """
+        Decide whether a segment is confidently enough noise to be discarded.
+        判断一段音频是否"噪声证据充分"到可以直接丢弃。
+
+        Returns a short reason string when the segment should be dropped, or None
+        when it must be kept. Everything uncertain is kept: an unanalysable buffer
+        (None), a low-confidence verdict, or any SNR at or above the threshold.
+        Discarding is irreversible, so the burden of proof is on discarding.
+        该丢弃时返回一句简短理由，该保留时返回 None。凡是拿不准的一律保留:
+        分析不出来的 (None)、置信度不够的、SNR 不够低的，全部留下。
+        丢弃不可逆，所以举证责任在"丢"这一边。
+
+        The two thresholds are deliberately redundant, and the confidence one binds.
+        On the NOISE branch of _classify_modulation() the confidence is a pure
+        function of snr_db -- clip(0.5 + (noise_snr_threshold_db - snr) / 12, .5, .99)
+        -- so at the stock settings (threshold 3.0 dB, min confidence 0.8) the real
+        cut is snr <= -0.6 dB, and the 0 dB SNR test never binds on its own. Keeping
+        both means loosening either one alone cannot silently widen the gate.
+        两个阈值是刻意冗余的，实际起作用的是置信度那个。_classify_modulation() 的
+        NOISE 分支里置信度完全由 snr_db 推出 ——
+        clip(0.5 + (noise_snr_threshold_db - snr) / 12, .5, .99) ——
+        所以在默认参数下 (阈值 3.0 dB、最低置信度 0.8) 真正的切点是 snr <= -0.6 dB，
+        0 dB 那道 SNR 判据自己永远不会先卡住。两个都留着，
+        是为了单独放宽其中一个时不会悄悄把闸门开大。
+
+        Measured 2026-08-31/09-01 on 4724 kHz: 274 recordings in one hour, all 274
+        classified NOISE at SNR -9.2 ~ +2.3 dB, while the four real exchanges that
+        night sat at +4.5 ~ +17.7 dB. The effective -0.6 dB cut sits in that gap,
+        5.1 dB below the weakest real signal.
+        2026-08-31/09-01 实测 4724 kHz: 一小时 274 条，274 条全判为 NOISE，
+        SNR 在 -9.2 ~ +2.3 dB；当晚 4 条真通联则在 +4.5 ~ +17.7 dB。
+        实际的 -0.6 dB 切点落在这道间隙里，比最弱的真信号还低 5.1 dB。
+        """
+        if not self.discard_noise or not analysis:
+            return None
+        if analysis.get("estimated_modulation") != "NOISE":
+            return None
+
+        confidence = float(analysis.get("modulation_confidence") or 0.0)
+        if confidence < self.discard_noise_min_confidence:
+            return None
+
+        snr = analysis.get("snr_db")
+        if snr is None or float(snr) >= self.discard_noise_max_snr_db:
+            return None
+
+        return (f"NOISE conf {confidence:.2f} >= "
+                f"{self.discard_noise_min_confidence:.2f}, "
+                f"SNR {float(snr):.1f} dB < "
+                f"{self.discard_noise_max_snr_db:.1f} dB")
+
+    def save_analysis_result(self, db, signal_id: int,
+                             analysis: Optional[Dict]) -> Optional[Dict]:
+        """
+        Persist an already-computed analysis against a signal row.
+        把算好的分析结果写到某条信号记录上。
+
+        Args:
+            db: Database 实例
+            signal_id: 信号 ID
+            analysis: analyze_buffer() 的返回值；None 时什么也不做
+        """
+        if not analysis:
+            return None
         db.save_analysis(
             signal_id=signal_id,
             peak_frequency_hz=analysis.get("peak_frequency_hz"),
@@ -161,6 +252,29 @@ class SignalAnalyzer:
             speech_score=analysis.get("speech_score"),
         )
         return analysis
+
+    def analyze_and_save(self, db, signal_id: int,
+                         audio_buffer: list, sample_rate: int = None,
+                         mode: str = None):
+        """
+        分析音频缓冲区并保存结果到数据库 (消除重复代码)。
+
+        Kept as the one-shot form for callers that have already committed to
+        writing the signal row. Callers that want the noise gate must instead run
+        analyze_buffer() -> noise_discard_reason() -> save_analysis_result().
+        保留这个一步到位的形式，供已经决定要写信号记录的调用方使用。
+        需要噪声闸门的调用方应改用
+        analyze_buffer() -> noise_discard_reason() -> save_analysis_result()。
+
+        Args:
+            db: Database 实例
+            signal_id: 信号 ID
+            audio_buffer: 音频块列表 [np.ndarray, ...]
+            sample_rate: 采样率，默认使用 self.sample_rate
+            mode: 解调模式 (决定通带和语音标签)
+        """
+        analysis = self.analyze_buffer(audio_buffer, sample_rate, mode=mode)
+        return self.save_analysis_result(db, signal_id, analysis)
 
     @staticmethod
     def load_wav(wav_path: str) -> Optional[Tuple[np.ndarray, int]]:

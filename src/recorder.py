@@ -17,6 +17,41 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def discard_recording(rec_info: Optional[dict]) -> bool:
+    """
+    Delete a finished recording that is not going to be filed in the database.
+    删掉一段不会写进数据库的录音文件。
+
+    Used by the noise gate: a segment the analyser confidently calls NOISE gets no
+    signal row, so leaving its WAV on disk would create an orphan -- a file no
+    record points at, which is exactly what makes clean_recordings.py risky to run.
+    Either both exist or neither does.
+    供噪声闸门使用: 被判为噪声的一段不会有信号记录，WAV 留在磁盘上就成了孤儿文件——
+    没有任何记录指向它，而这正是 clean_recordings.py 跑起来有风险的原因。
+    要么两个都在，要么两个都不在。
+
+    Args:
+        rec_info: recorder.stop_recording() 的返回值，None 表示当时没在录
+
+    Returns:
+        是否确实删掉了一个文件
+    """
+    path = (rec_info or {}).get("path")
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        os.remove(path)
+        return True
+    except OSError as e:
+        # Not fatal: the row was withheld either way, this only leaves a stray file.
+        # 不致命: 记录本来就没写，这里最多留下一个游离的文件。
+        logger.warning(
+            f"[REC-DISCARD] failed to delete {os.path.basename(path)}: {e} "
+            f"/ 删除录音文件失败"
+        )
+        return False
+
+
 class AudioRecorder:
     """
     音频录制器。

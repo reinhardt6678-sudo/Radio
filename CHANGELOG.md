@@ -4,6 +4,104 @@
 > of that release.
 > 英文在前、中文在后。每条记录里的测试数量是该版本发布时的数量。
 
+## Unreleased / 未发布
+
+The analyser was right about all 274 of them. Nobody asked it in time.
+
+An hour of listening on 4724 kHz produced **274 recordings, every one of them classified
+`NOISE`**, at in-band SNR −9.2 ~ +2.3 dB — a 68% recording duty cycle from a band that was
+only over the squelch threshold 2.8% of the time. The four real exchanges heard that night sat
+at +4.5 ~ +17.7 dB, nowhere near them. The classifier separated the two perfectly.
+
+It just ran too late to matter. In `receiver.py` the order was:
+
+```
+db.record_signal(...)          # row written
+analyzer.analyze_and_save(...) # "...this is noise"
+```
+
+By the time the verdict existed, the row was in the database and the WAV was on disk. The one
+component that could tell noise from signal had no say in whether either was kept.
+
+分析器对这 274 条全判对了。只是没人来得及问它。
+
+在 4724 kHz 上听一小时录出 **274 条，条条判为 `NOISE`**，带内 SNR 在 −9.2 ~ +2.3 dB ——
+一个只有 2.8% 的时间越过静噪阈值的频段，最后录音占空比 68%。当晚 4 条真通联在
++4.5 ~ +17.7 dB，和这批差得很远。分类器把两者分得干干净净。
+
+它只是跑得太晚了。`receiver.py` 里的顺序是：先 `db.record_signal(...)` 写记录，
+再 `analyzer.analyze_and_save(...)` 说"这是噪声"。等判定结果出来时，记录已经进库、
+WAV 已经落盘。唯一分得清噪声和信号的那个组件，对留不留它们没有发言权。
+
+### ✨ Changes / 改动
+
+- **The analysis now runs before the write, and can withhold it.** A segment classified `NOISE`
+  with confidence at or above `discard_noise_min_confidence` (default `0.8`) *and* an in-band
+  SNR below `discard_noise_max_snr_db` (default `0.0`) gets no signal row and no recording on
+  disk. This needs no new signal processing — it only connects a verdict that was already
+  correct to the decision it should have been driving. Set `discard_noise: false` to file
+  everything as before; the verdict is still stored either way.
+
+  **分析改到写库之前跑，并且有权拦下这条记录。** 判为 `NOISE`、置信度不低于
+  `discard_noise_min_confidence`（默认 `0.8`）**且**带内 SNR 低于
+  `discard_noise_max_snr_db`（默认 `0.0`）的段，不写信号记录，也不在磁盘上留录音。
+  这不需要任何新的信号处理 —— 只是把一个本来就判对了的结论，接到它该驱动的决策上。
+  写 `discard_noise: false` 可恢复成以前那样全部入库；判定结果两种情况下都照常保存。
+
+- **The two thresholds are redundant on purpose, and the confidence one binds.** On the `NOISE`
+  branch the confidence is a pure function of SNR, so at stock settings the real cut is
+  **SNR ≤ −0.6 dB** — 5.1 dB below the weakest real exchange measured, and still catching the
+  bulk of the noise bursts. Keeping both gates means loosening either one alone cannot silently
+  widen the opening.
+
+  **两个阈值是刻意冗余的，实际起作用的是置信度那个。** `NOISE` 分支的置信度完全由 SNR
+  推出，所以在默认参数下真正的切点是 **SNR ≤ −0.6 dB** —— 比实测最弱的真通联还低
+  5.1 dB，同时仍能拦下绝大部分噪声突发。两道闸门都留着，意味着单独放宽其中一个
+  不会悄悄把口子开大。
+
+- **Anything uncertain is kept.** A buffer too short to analyse (under one second), a
+  low-confidence verdict, any SNR at or above the threshold — all filed as before. Discarding
+  is irreversible, so the burden of proof sits on discarding.
+
+  **凡是拿不准的一律保留。** 不足一秒无法分析的、置信度不够的、SNR 不够低的，
+  全部照常入库。丢弃不可逆，所以举证责任在"丢"这一边。
+
+- **A discarded segment loses its row and its WAV together.** Keeping the file without a record
+  would leave an orphan that nothing points at — which is exactly what makes
+  `clean_recordings.py` risky to run. Either both exist or neither does.
+
+  **被丢弃的段同时失去记录和 WAV。** 留下文件却没有记录就成了孤儿文件，
+  没有任何记录指向它 —— 而这正是 `clean_recordings.py` 跑起来有风险的原因。
+  要么两个都在，要么两个都不在。
+
+- **Discards are counted and logged separately from signals.** `[NOISE-DISCARD]` names the
+  frequency, the reason and whether the file was deleted; the count is exposed as
+  `discarded_signals` on the web status API. A quiet band and a band drowning in wideband noise
+  no longer look identical from the outside.
+
+  **丢弃单独计数、单独打日志，不混进信号数。** `[NOISE-DISCARD]` 会写明频率、理由，
+  以及文件删没删；计数通过 Web 状态接口的 `discarded_signals` 暴露出来。
+  "真的没东西"和"全是宽带噪声"从外面看不再是同一个样子。
+
+### Notes / 说明
+
+This does not change what the squelch records, only what survives to the database — the radio
+still opens on those noise bursts and still writes a file first. Narrowing the squelch itself
+(a minimum-duration gate, or a margin that tracks variance rather than only the noise floor)
+is a separate change; the measured `+14 dB` margin triggers **28× more often** on 4724 kHz than
+on 11175 kHz despite noise floors within 3 dB of each other.
+
+本次改动不影响静噪录什么，只影响什么能活到数据库里 —— 收到那些噪声突发时静噪照样打开，
+录音文件也照样先写出来。收窄静噪本身（最短时长门限，或让余量跟着方差走而不只看底噪）
+是另一件事：实测同样的 `+14 dB` 余量在 4724 kHz 上的触发频次是 11175 kHz 的 **28 倍**，
+而两者底噪相差不到 3 dB。
+
+Existing records are untouched; the gate only applies to segments received from now on.
+已有记录不受影响；闸门只对此后收到的段生效。
+
+Tests: 262 passed (230 before this change).
+测试：262 通过（本次改动前为 230）。
+
 ## v1.4.3 (2026-08-31)
 
 A node can pass every check the monitor makes and still be **completely silent**.

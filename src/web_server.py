@@ -25,7 +25,7 @@ from .kiwi_client import KiwiSDRClient
 from .node_manager import NodeManager
 from .squelch import (SquelchDetector, MODE_ABSOLUTE, MODE_SMETER,
                       VALID_MODES, db_to_ratio)
-from .recorder import AudioRecorder
+from .recorder import AudioRecorder, discard_recording
 from .analyzer import SignalAnalyzer
 from .modes import audio_passband, normalize_mode
 from .db import Database
@@ -63,6 +63,8 @@ class WebMonitorServer:
         self._current_mode = "USB"
         self._current_node = {}
         self._total_signals = 0
+        # 被噪声闸门挡在库外的段数 / segments the noise gate kept out of the database
+        self._discarded_signals = 0
         self._monitor_start_time = 0.0
 
         # 实时数据
@@ -233,6 +235,11 @@ class WebMonitorServer:
             "smeter_dbm": round(self._current_smeter, 1),
             "signal_active": self._signal_active,
             "total_signals": self._total_signals,
+            # 被噪声闸门挡下的段数 —— 和 total_signals 分开，界面上才能看出
+            # "安静"和"全是宽带噪声"的区别
+            # Kept apart from total_signals so the UI can tell a quiet band from
+            # one drowning in wideband noise.
+            "discarded_signals": self._discarded_signals,
             "elapsed_seconds": round(elapsed, 0),
             "session_id": self._session_id,
             "rms_history": self._rms_history[-100:],  # 最近100个点
@@ -741,6 +748,7 @@ class WebMonitorServer:
         self._current_mode = mode
         self._current_node = node
         self._total_signals = 0
+        self._discarded_signals = 0
         self._rms_history = []
         self._smeter_history = []
         self._monitor_start_time = time.time()
@@ -859,6 +867,29 @@ class WebMonitorServer:
                 def on_signal_close(duration, peak_rms, avg_rms):
                     self._signal_active = False
                     rec_info = self._recorder.stop_recording()
+
+                    # 频谱分析在入库之前跑，结论要用来决定入不入库
+                    # 传入解调模式: SNR 和调制判定按对应通带来算
+                    # The analysis runs before the write so its verdict can gate it.
+                    sr = self.config.get("receiver", {}).get("sample_rate", 12000)
+                    analysis = self._analyzer.analyze_buffer(
+                        self._signal_audio_buffer, sr, mode=mode
+                    )
+
+                    # 和命令行监听同一道噪声闸门 / same noise gate as CLI monitoring
+                    reason = self._analyzer.noise_discard_reason(analysis)
+                    if reason:
+                        self._discarded_signals += 1
+                        deleted = discard_recording(rec_info)
+                        logger.info(
+                            f"[NOISE-DISCARD] #{self._discarded_signals} "
+                            f"{freq_khz:.1f} kHz: {reason} — not filed"
+                            f"{', recording deleted' if deleted else ''} "
+                            f"/ 判为噪声，未入库"
+                            f"{'，录音已删除' if deleted else ''}"
+                        )
+                        return
+
                     self._total_signals += 1
 
                     sig_id = self.db.record_signal(
@@ -870,12 +901,8 @@ class WebMonitorServer:
                         recording_path=rec_info["path"] if rec_info else None,
                         description="", network="",
                     )
-
-                    # 频谱分析（使用统一方法避免重复代码）
-                    # 传入解调模式: SNR 和调制判定按对应通带来算
-                    sr = self.config.get("receiver", {}).get("sample_rate", 12000)
-                    analysis = self._analyzer.analyze_and_save(
-                        self.db, sig_id, self._signal_audio_buffer, sr, mode=mode
+                    analysis = self._analyzer.save_analysis_result(
+                        self.db, sig_id, analysis
                     ) or {}
 
                     entry = {

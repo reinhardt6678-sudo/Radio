@@ -135,6 +135,21 @@ class Database:
             "syllabic_ratio": "REAL",
             "passband_tilt_db": "REAL",
             "speech_score": "REAL",
+            # The five per-class scores that decide estimated_modulation, as JSON.
+            # Without them a verdict cannot be explained or a change to the classifier
+            # verified -- and worse, NOISE and USB_VOICE look identical in this table
+            # even though NOISE is returned by an SNR gate *before* any scoring happens.
+            # 决定 estimated_modulation 的五类得分, 存 JSON。
+            # 没有它们既无法解释一条判定, 也无法验证对分类器的改动 —— 更要紧的是,
+            # NOISE 和 USB_VOICE 在这张表里长得一样, 而 NOISE 是在打分之前
+            # 由一道 SNR 闸门返回的。
+            "modulation_scores": "TEXT",
+            # The only evidence CW / CARRIER / FSK rest on. Unstored, those three
+            # classes cannot be reconstructed offline at all.
+            # CW / CARRIER / FSK 的唯一依据。不存的话这三类完全无法离线重建。
+            "tone_spacing_hz": "REAL",
+            "tone_purity": "REAL",
+            "keying_rate_hz": "REAL",
         })
 
         # 创建索引
@@ -320,7 +335,11 @@ class Database:
                       tone_count: int = None,
                       syllabic_ratio: float = None,
                       passband_tilt_db: float = None,
-                      speech_score: float = None) -> int:
+                      speech_score: float = None,
+                      modulation_scores: Dict[str, float] = None,
+                      tone_spacing_hz: float = None,
+                      tone_purity: float = None,
+                      keying_rate_hz: float = None) -> int:
         """保存信号分析结果。"""
         with self._lock:
             cursor = self.conn.cursor()
@@ -331,9 +350,10 @@ class Database:
                  crest_factor_db, energy_total, fft_peak_magnitudes, notes,
                  modulation_confidence, demod_mode, noise_floor_db,
                  envelope_rate_hz, envelope_depth, tone_count,
-                 syllabic_ratio, passband_tilt_db, speech_score)
+                 syllabic_ratio, passband_tilt_db, speech_score,
+                 modulation_scores, tone_spacing_hz, tone_purity, keying_rate_hz)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?)
             """, (
                 signal_id,
                 datetime.now(timezone.utc).isoformat(),
@@ -356,6 +376,22 @@ class Database:
                 syllabic_ratio,
                 passband_tilt_db,
                 speech_score,
+                # The stored dict distinguishes three cases that the label alone cannot:
+                #   {"NOISE": c}   the SNR gate returned before any scoring ran
+                #   five classes   scoring actually happened
+                #   {}             audio too short to analyse at all
+                # An empty dict is therefore meaningful, not missing -- test against None,
+                # never truthiness, or the third case is silently stored as NULL.
+                # 存下来的字典能区分标签本身分不出的三种情况:
+                #   {"NOISE": c}   SNR 闸门在打分之前就返回了
+                #   五个类别        真的打过分
+                #   {}             音频太短, 压根没分析
+                # 所以空字典是有意义的、不是缺失 —— 要判 is not None, 不能判真假值,
+                # 否则第三种情况会被悄悄存成 NULL。
+                json.dumps(modulation_scores) if modulation_scores is not None else None,
+                tone_spacing_hz,
+                tone_purity,
+                keying_rate_hz,
             ))
             self.conn.commit()
             return cursor.lastrowid

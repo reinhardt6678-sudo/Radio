@@ -250,6 +250,12 @@ class SignalAnalyzer:
             syllabic_ratio=analysis.get("syllabic_ratio"),
             passband_tilt_db=analysis.get("passband_tilt_db"),
             speech_score=analysis.get("speech_score"),
+            # Without these the label is the only thing left of the decision.
+            # 不存这些的话，一次判定就只剩下那个标签。
+            modulation_scores=analysis.get("modulation_scores"),
+            tone_spacing_hz=analysis.get("tone_spacing_hz"),
+            tone_purity=analysis.get("tone_purity"),
+            keying_rate_hz=analysis.get("keying_rate_hz"),
         )
         return analysis
 
@@ -393,11 +399,23 @@ class SignalAnalyzer:
         result["modulation_scores"] = scores
         result["modulation_description"] = self.MODULATION_DESCRIPTIONS.get(label, label)
 
+        # Log the per-class scores next to the verdict. A single NOISE key means the SNR
+        # gate returned before any scoring ran; five keys mean scoring happened. Printing
+        # the scores is what makes those two cases distinguishable in a log at all.
+        # 判定旁边把得分一起打出来。只有一个 NOISE 键 = SNR 闸门在打分之前就返回了,
+        # 五个键 = 真的打过分。把得分打出来, 这两种情况在日志里才分得开。
+        if len(scores) == 1 and "NOISE" in scores:
+            score_text = "SNR 闸门在打分前返回 / gated before scoring"
+        elif scores:
+            score_text = " ".join(f"{k}={v:g}" for k, v in
+                                  sorted(scores.items(), key=lambda kv: -kv[1]))
+        else:
+            score_text = "未分析 / not analysed"
         logger.info(
             f"分析完成: 时长={duration:.1f}s, "
             f"带内SNR={result.get('snr_db', 0):.1f}dB, "
             f"占用带宽={result.get('bandwidth_hz', 0):.0f}Hz, "
-            f"调制={label} (置信度 {confidence:.2f})"
+            f"调制={label} (置信度 {confidence:.2f}) | scores: {score_text}"
         )
 
         return result

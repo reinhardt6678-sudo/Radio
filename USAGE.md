@@ -1105,6 +1105,21 @@ history):
 | `envelope_rate_hz` | Envelope syllabic rate / 包络音节率 |
 | `envelope_depth` | Envelope modulation depth / 包络调制深度 |
 | `tone_count` | Number of tones detected / 检出的音调数 |
+| `modulation_scores` | The per-class scores behind `estimated_modulation`, as JSON. Five keys = scoring ran; a single `NOISE` key = the SNR gate returned before any scoring; `{}` = the audio was too short to analyse<br>`estimated_modulation` 背后的各类得分，存 JSON。五个键 = 真的打过分；只有一个 `NOISE` 键 = SNR 闸门在打分之前就返回了；`{}` = 音频太短没能分析 |
+| `tone_spacing_hz` | Spacing between detected tones — the evidence FSK rests on / 检出音调之间的间距，FSK 的判据 |
+| `tone_purity` | Share of in-band excess energy sitting in the strongest tone — the evidence CARRIER rests on / 带内多余能量集中在最强音调上的比例，CARRIER 的判据 |
+| `keying_rate_hz` | Envelope keying rate — the evidence CW rests on / 包络键控率，CW 的判据 |
+
+> **Reading `modulation_scores` matters for a specific reason.** `NOISE` is *not* one of the
+> five classes — it is returned by an in-band SNR gate that runs **before** any scoring. In
+> this table a gated `NOISE` row and a scored `USB_VOICE` row look alike, and mistaking the
+> first for "the classifier judged it noise" sent this project's own defect diagnosis wrong
+> for two days. The scores are what tell them apart.
+>
+> **读 `modulation_scores` 有个具体的理由。** `NOISE` **不是**那五个类别之一 ——
+> 它由一道带内 SNR 闸门返回，而闸门跑在**打分之前**。在这张表里，被闸门拦下的 `NOISE`
+> 和真的打过分的 `USB_VOICE` 长得一样，把前者当成"分类器判它是噪声"曾让本项目自己的
+> 缺陷诊断错了两天。得分就是用来区分这两者的。
 
 Indexes: `signals(timestamp)`, `signals(frequency_khz)`, `signals(session_id)`,
 `analysis(signal_id)`.

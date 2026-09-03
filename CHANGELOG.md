@@ -6,6 +6,106 @@
 
 ## Unreleased / 未发布
 
+### The five scores that decide a verdict were computed and thrown away
+
+`_classify_modulation()` scores five candidate classes, picks a winner, and returns the
+scores alongside it. Nothing kept them: the log line printed only the label and the
+confidence, and `save_analysis()` had no parameter for them. One line after being computed,
+the entire basis for a modulation verdict was gone.
+
+That is not merely inconvenient for debugging — it produced a wrong diagnosis in this
+repository. A survey of 882 records showed that of the 33 with `speech_score >= 0.5` only 2
+were labelled `VOICE`, while 9 of the 12 `VOICE` records had `speech_score` of exactly 0.
+The obvious reading was that the classifier and the speech metric were in systematic
+conflict, and two days of analysis were built on it.
+
+The obvious reading was wrong. **`NOISE` is not one of the five classes.** It is returned by
+an in-band SNR gate at the top of `_classify_modulation()`, before any scoring runs:
+
+```python
+if snr < self.noise_snr_threshold_db:
+    return "NOISE", ..., {"NOISE": confidence}
+```
+
+Those 31 records never reached the classifier. Their SNR median was −2.9 dB; the gate was
+right to stop them. But in the `analysis` table a gated `NOISE` row and a scored
+`USB_VOICE` row are indistinguishable, so the mistake was invisible — and only became
+visible after reconstructing the VOICE score offline from the stored features.
+
+Reconstruction also showed what is *not* wrong: among records that passed the gate, label
+and score agree. #914 scored 0.922 and was labelled `USB_VOICE`; #909 scored 0.603, was
+outscored by PSK at 0.717, and came out `UNKNOWN` at confidence 0.28 — exactly the intended
+"not enough evidence, do not guess" behaviour.
+
+**决定判定的五个得分，算完就被扔掉了**
+
+`_classify_modulation()` 给五个候选类别打分、选出胜者，并把得分一起返回。没有人留下它们：
+日志只打标签和置信度，`save_analysis()` 也没有对应的参数。算出来的下一行，
+一次调制判定的全部依据就消失了。
+
+这不只是排查不便 —— 它在本仓库里造成了一个错误的诊断。882 条记录的统计显示：
+`speech_score >= 0.5` 的 33 条里只有 2 条判为 `VOICE`，而 12 条 `VOICE` 里有 9 条的
+`speech_score` 恰好为 0。看上去分类器和语音评分在系统性冲突，两天的分析建立在这个判断上。
+
+这个判断是错的。**`NOISE` 不是那五个类别之一**，它由 `_classify_modulation()` 开头的
+带内 SNR 闸门返回，跑在任何打分之前（见上面的代码）。那 31 条记录根本没到达分类器 ——
+它们的 SNR 中位数是 −2.9 dB，闸门拦得对。但在 `analysis` 表里，被闸门拦下的 `NOISE`
+和真的打过分的 `USB_VOICE` 无法区分，所以这个错误是看不见的 ——
+直到用离线脚本从入库特征里把 VOICE 得分重建出来，才浮出水面。
+
+重建同时说明了哪里**没有**问题：过了闸门的记录，标签和得分是一致的。
+#914 得分 0.922 判为 `USB_VOICE`；#909 得分 0.603、被 PSK 的 0.717 反超，
+以 0.28 的置信度输出 `UNKNOWN` —— 正是"证据不足就不硬猜"的设计意图。
+
+### ✨ Changes / 改动
+
+- **`modulation_scores` now persists as JSON**, and the stored dict distinguishes three
+  cases the label alone cannot: five keys = scoring ran, a single `NOISE` key = the SNR gate
+  returned first, `{}` = the audio was too short to analyse. An empty dict is meaningful
+  rather than missing, so the write tests `is not None` rather than truthiness — a
+  truthiness test would silently store the third case as `NULL`.
+
+  **`modulation_scores` 改为以 JSON 落库**，存下来的字典能区分标签本身分不出的三种情况：
+  五个键 = 真的打过分，只有一个 `NOISE` 键 = SNR 闸门先返回了，`{}` = 音频太短没能分析。
+  空字典是有意义的、不是缺失，所以写入时判的是 `is not None` 而不是真假值 ——
+  判真假值会把第三种情况悄悄存成 `NULL`。
+
+- **The log line now prints the scores** next to the verdict, and names the gated case
+  explicitly instead of printing nothing.
+
+  **日志行在判定旁边打出得分**，并把"被闸门拦下"这种情况明确写出来，而不是什么都不打。
+
+- **`tone_spacing_hz` / `tone_purity` / `keying_rate_hz` now persist too.** They are the only
+  evidence `CW`, `CARRIER` and `FSK` rest on; unstored, those three classes could not be
+  reconstructed offline at all, which is why the reconstruction above covered only VOICE
+  and PSK.
+
+  **`tone_spacing_hz` / `tone_purity` / `keying_rate_hz` 一并落库。** 它们是
+  `CW`、`CARRIER`、`FSK` 的唯一依据；不存的话这三类完全无法离线重建 ——
+  上面那次重建之所以只覆盖了 VOICE 和 PSK，就是因为这个。
+
+### Notes / 说明
+
+Existing databases gain the four columns automatically on first open; no migration step and
+no history lost. Rows written before this change keep `NULL` in all four — the scores behind
+those verdicts are not recoverable.
+
+老数据库首次打开时自动补上这四列，无需迁移步骤、不丢历史数据。本次改动之前写入的记录
+这四列都是 `NULL` —— 那些判定背后的得分已经无法找回。
+
+This change is a prerequisite for adjusting the classifier's membership boundaries (the
+`bandwidth` lower bound of 600 Hz and the saturated `envelope_depth` ramps): those need
+before/after comparison to verify, which was impossible while the scores were discarded.
+
+本次改动是调整分类器隶属度边界（`bandwidth` 的 600 Hz 下界、以及饱和的
+`envelope_depth` 斜坡）的前置条件：那些改动需要 before/after 对比来验证，
+而得分被丢掉时无从对比。
+
+Tests: 269 passed (262 before this change, 7 added).
+测试：269 通过（本次改动前 262，新增 7）。
+
+---
+
 The analyser was right about all 274 of them. Nobody asked it in time.
 
 An hour of listening on 4724 kHz produced **274 recordings, every one of them classified

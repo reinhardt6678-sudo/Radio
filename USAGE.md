@@ -949,6 +949,22 @@ exactly why everything used to tie for first place (see §13).
 `s_meter_dbm` 是 KiwiSDR 报告的接收电平，换算式 `0.1 × (raw & 0x0FFF) − 127`。
 Web 页面同时显示 dBm、S 级和电平条。
 
+On a signal row, `s_meter_dbm` is the **peak measured while the squelch was open**, and
+`s_meter_avg_dbm` is the mean over the same span — the pair mirrors `peak_rms` / `avg_rms`.
+Both stop accumulating once the level drops below the close threshold, so the `tail_time`
+coast-down is excluded.
+
+信号记录里的 `s_meter_dbm` 是**静噪打开期间的峰值**，`s_meter_avg_dbm` 是同一段的均值 ——
+这一对和 `peak_rms` / `avg_rms` 对称。电平跌破关闭阈值后两者都停止累计，
+所以 `tail_time` 的收尾段不计入。
+
+> **Rows written before 2026-09-04 hold the noise floor here, not the signal.** They were
+> read after the signal had ended, so they sit within about 1 dB of the floor and understate
+> the real level by 15–17 dB. Do not compare them against rows written since.
+>
+> **2026-09-04 之前写入的记录，这一栏存的是底噪而不是信号。** 它们是在信号结束之后读的，
+> 因此距当时底噪约 1 dB 以内，比真实电平低 15–17 dB。不要拿它们和之后的记录比较。
+
 Typical values: S9 ≈ −73 dBm; the HF noise floor is commonly −110 to −95 dBm; a strong EAM
 broadcast reaches around −70 dBm.
 
@@ -1088,7 +1104,7 @@ Recording filename format: `YYYYMMDD_HHMMSS_<frequency>kHz_<node name>.wav`
 | Table / 表 | Contents / 内容 | Key fields / 关键字段 |
 |----|------|----------|
 | `sessions` | One row per monitoring run / 每次监听会话 | `start_time`, `end_time`, `node_host`, `node_name`, `frequencies`, `status` |
-| `signals` | One row per detected signal / 每个检测到的信号 | `timestamp`, `frequency_khz`, `mode`, `duration_seconds`, `peak_rms`, `avg_rms`, `s_meter_dbm`, `recording_path` |
+| `signals` | One row per detected signal / 每个检测到的信号 | `timestamp`, `frequency_khz`, `mode`, `duration_seconds`, `peak_rms`, `avg_rms`, `s_meter_dbm`, `s_meter_avg_dbm`, `recording_path` |
 | `analysis` | Spectral analysis of a signal / 信号的频谱分析 | `snr_db`, `bandwidth_hz`, `estimated_modulation`, `spectral_centroid_hz`, `spectral_flatness`, `crest_factor_db`, `fft_peak_magnitudes` |
 | `nodes` | Node status history / 节点状态历史 | `host`, `port`, `is_available`, `avg_latency_ms`, `total_connections`, `total_failures` |
 

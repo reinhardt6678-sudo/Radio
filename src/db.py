@@ -111,6 +111,15 @@ class Database:
             )
         """)
 
+        # Signals table increment: the mean S-meter across the signal, the companion to the
+        # peak. A peak alone can come from a single spike; peak_rms/avg_rms are already
+        # stored as a pair for exactly that reason.
+        # 信号表的增量字段: 信号期间的 S-meter 均值, 峰值的配套。
+        # 单看峰值可能来自一次尖峰; peak_rms/avg_rms 成对存储正是这个道理。
+        self._migrate_columns(cursor, "signals", {
+            "s_meter_avg_dbm": "REAL",
+        })
+
         # Node table increments: audio liveness tally. A node can be reachable, fast and
         # still deliver nothing but digital silence -- latency and handshake cannot see that,
         # so it has to be remembered across runs or the same node gets picked again.
@@ -223,7 +232,7 @@ class Database:
                       duration_seconds: float, peak_rms: float,
                       avg_rms: float, s_meter_dbm: float = None,
                       recording_path: str = None, description: str = "",
-                      network: str = "") -> int:
+                      network: str = "", s_meter_avg_dbm: float = None) -> int:
         """记录一个检测到的信号，返回信号ID。"""
         with self._lock:
             cursor = self.conn.cursor()
@@ -231,8 +240,8 @@ class Database:
                 INSERT INTO signals
                 (session_id, timestamp, frequency_khz, mode, node_host, node_name,
                  duration_seconds, peak_rms, avg_rms, s_meter_dbm,
-                 recording_path, description, network)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recording_path, description, network, s_meter_avg_dbm)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_id,
                 datetime.now(timezone.utc).isoformat(),
@@ -246,7 +255,8 @@ class Database:
                 s_meter_dbm,
                 recording_path,
                 description,
-                network
+                network,
+                s_meter_avg_dbm,
             ))
             self.conn.commit()
             return cursor.lastrowid

@@ -897,7 +897,11 @@ class WebMonitorServer:
                         frequency_khz=freq_khz, mode=mode,
                         node_host=host, node_name=node_name,
                         duration_seconds=duration, peak_rms=peak_rms, avg_rms=avg_rms,
-                        s_meter_dbm=self._current_smeter,
+                        # 信号期间的峰值, 不是当前瞬时值 —— 后者此刻已是底噪。
+                        # The in-signal peak, not the current instantaneous reading,
+                        # which by now is the noise floor.
+                        s_meter_dbm=self._squelch.last_peak_smeter_dbm,
+                        s_meter_avg_dbm=self._squelch.last_avg_smeter_dbm,
                         recording_path=rec_info["path"] if rec_info else None,
                         description="", network="",
                     )

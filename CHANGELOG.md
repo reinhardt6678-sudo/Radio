@@ -6,6 +6,82 @@
 
 ## Unreleased / 未发布
 
+### Every signal strength in the database was the noise floor
+
+`record_signal()` was called from the squelch's `on_close` handler, and the value it passed
+for `s_meter_dbm` was `client.smeter` — the *current* reading at that moment. But `on_close`
+fires after the signal has ended, plus `tail_time` seconds on top. By then the level has
+fallen back to the noise floor, and that is what got stored.
+
+Measured 2026-09-01, two consecutive signals:
+
+| | S-meter while open | noise floor then | stored | error |
+|---|---|---|---|---|
+| #7 | −83.0 dBm | −98.5 | **−97.9** | −14.9 dB |
+| #8 | −81.9 dBm | −99.0 | **−98.9** | −17.0 dB |
+
+The stored value landed within 0.6 dB of the floor. Nothing in the row revealed it: a
+plausible dBm reading taken at the wrong moment still looks exactly like a reading. The same
+mistake sat in all three write paths — the single-frequency loop, the multi-frequency
+rotation, and the web monitor's callback.
+
+**库里每一条信号的强度都是底噪**
+
+`record_signal()` 是在静噪的 `on_close` 处理函数里调用的，传给 `s_meter_dbm` 的是
+`client.smeter` —— 那一刻的**当前**读数。但 `on_close` 触发时信号早已结束，
+还要再加上 `tail_time` 秒。此时电平已经掉回底噪，存进去的就是底噪（见上表）。
+
+存下来的值距当时底噪不到 0.6 dB。而记录本身完全看不出问题：一个取自错误时刻的
+合理 dBm 数值，看上去和正常读数一模一样。三条写入路径全都是这个错误 ——
+单频率循环、多频率轮转、以及 Web 监听的回调。
+
+### ✨ Changes / 改动
+
+- **The squelch now tracks the S-meter across the signal** and publishes
+  `last_peak_smeter_dbm` / `last_avg_smeter_dbm` when it closes. Both stop accumulating once
+  the level drops below the close threshold, matching how `_peak_rms` already behaved — the
+  `tail_time` coast-down is not part of the signal, and letting it in is precisely how the
+  old code ended up with the floor.
+
+  **静噪现在跟踪整段信号的 S-meter**，关闭时给出 `last_peak_smeter_dbm` /
+  `last_avg_smeter_dbm`。电平跌破关闭阈值后两者都停止累计，和 `_peak_rms` 的既有行为一致
+  —— `tail_time` 的收尾段不属于这段信号，把它算进来正是旧代码最终存下底噪的原因。
+
+- **They are attributes rather than extra callback arguments.** The
+  `on_close(duration, peak_rms, avg_rms)` contract has nine call sites including six test
+  lambdas; widening it would break all of them for no gain. The values are set before the
+  callback runs and deliberately not reset afterwards, because they describe the signal that
+  just ended.
+
+  **做成属性而不是给回调加参数。** `on_close(duration, peak_rms, avg_rms)` 这个约定有九处
+  调用方，其中六处是测试里的 lambda；加宽签名会把它们全部打断而毫无收益。
+  这两个值在回调之前赋值、之后刻意不重置，因为它们描述的正是刚结束的那段信号。
+
+- **`signals` gains `s_meter_avg_dbm`**, the companion to the peak. A peak alone can come
+  from a single spike; `peak_rms` / `avg_rms` are already stored as a pair for that reason.
+
+  **`signals` 表新增 `s_meter_avg_dbm`**，峰值的配套。单看峰值可能来自一次尖峰；
+  `peak_rms` / `avg_rms` 成对存储正是这个道理。
+
+### Notes / 说明
+
+Existing databases gain the column automatically on first open. **Rows written before this
+change keep the floor in `s_meter_dbm` and cannot be corrected** — the in-signal readings were
+never recorded. Any analysis mixing them with rows written since will understate the older
+signals by 15–17 dB; the "signal strength distribution" chart in the HTML report is built on
+this column and does not hold for the older data.
+
+老数据库首次打开时自动补列。**本次改动之前写入的记录，`s_meter_dbm` 里仍是底噪，且无法修正**
+—— 信号期间的读数从未被记录过。把它们和之后的记录混在一起分析，会让旧记录低估 15–17 dB；
+HTML 报告里的"信号强度分布"图基于这一列，对旧数据不成立。
+
+Tests: 277 passed (269 before this change, 8 added). Reverse-verified: restoring the old
+`client.smeter` read fails exactly 4 cases, all of them in `TestPeakCapturedDuringSignal`,
+while the backwards-compatibility and no-S-meter cases keep passing.
+
+测试：277 通过（本次改动前 269，新增 8）。反向验证：改回读 `client.smeter` 后精确失败 4 条，
+全在 `TestPeakCapturedDuringSignal`，向后兼容和"没有 S-meter"那两条照常通过。
+
 ### The five scores that decide a verdict were computed and thrown away
 
 `_classify_modulation()` scores five candidate classes, picks a winner, and returns the

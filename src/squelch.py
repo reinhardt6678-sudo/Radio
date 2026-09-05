@@ -169,6 +169,27 @@ class SquelchDetector:
         self._audio_dead_warned = False
         self._audio_alive_confirmed = False
 
+        # S-meter aggregates for the signal currently open, and for the one that just ended.
+        # The receiver used to read client.smeter inside on_close, which runs after the signal
+        # is over -- and after tail_time on top of that -- so what it stored was the noise
+        # floor, not the signal. Measured 2026-09-01: two signals whose S-meter read -83.0 and
+        # -81.9 dBm while open were filed as -97.9 and -98.9 dBm, within 0.6 dB of the floor.
+        # Every strength figure in the database was wrong by 15-17 dB, and nothing in the row
+        # showed it: the stored value is a plausible dBm reading, just taken at the wrong time.
+        #
+        # 当前这段信号、以及刚结束那段信号的 S-meter 汇总值。
+        # 接收器过去在 on_close 里读 client.smeter, 而那已经是信号结束之后
+        # (还要再加上 tail_time), 所以存进去的是底噪, 不是信号。
+        # 2026-09-01 实测: 两条信号打开时 S-meter 分别是 -83.0 和 -81.9 dBm,
+        # 入库却成了 -97.9 和 -98.9 dBm, 距当时底噪不到 0.6 dB。
+        # 库里每一条的强度都错了 15-17 dB, 而记录本身看不出来 ——
+        # 存的是个合理的 dBm 数值, 只是取自错误的时刻。
+        self._peak_smeter: Optional[float] = None
+        self._smeter_sum = 0.0
+        self._smeter_n = 0
+        self.last_peak_smeter_dbm: Optional[float] = None
+        self.last_avg_smeter_dbm: Optional[float] = None
+
         # 卡死保护
         self._forced_closes = 0
         self._stuck_open = False
@@ -311,6 +332,11 @@ class SquelchDetector:
                 self._signal_start_time = now
                 self._last_above_time = now
                 self._peak_rms = rms
+                # Seed from the block that opened the squelch: that one is part of the signal.
+                # 用触发这次打开的那一块做种子: 它本身就属于这段信号。
+                self._peak_smeter = self._current_smeter
+                self._smeter_sum = self._current_smeter or 0.0
+                self._smeter_n = 1 if self._current_smeter is not None else 0
 
                 if self.mode == MODE_SMETER:
                     logger.info(
@@ -337,6 +363,17 @@ class SquelchDetector:
             if above_close:
                 self._last_above_time = now
                 self._peak_rms = max(self._peak_rms, rms)
+                # Only accumulate while the level is still above the close threshold, matching
+                # _peak_rms: the tail_time coast-down is not part of the signal, and letting it
+                # in is exactly how the old code ended up storing the noise floor.
+                # 只在电平仍高于关闭阈值时累计, 和 _peak_rms 一致:
+                # tail_time 的收尾段不属于这段信号, 把它算进来正是旧代码
+                # 最终存下底噪的原因。
+                if self._current_smeter is not None:
+                    self._peak_smeter = (self._current_smeter if self._peak_smeter is None
+                                         else max(self._peak_smeter, self._current_smeter))
+                    self._smeter_sum += self._current_smeter
+                    self._smeter_n += 1
 
             # 传递活跃音频
             if self._on_audio:
@@ -379,6 +416,17 @@ class SquelchDetector:
         avg_rms = (float(np.mean(list(self._rms_history)))
                    if self._rms_history else 0.0)
         peak_rms = self._peak_rms
+
+        # Publish before the callback runs, and leave them set afterwards: they describe the
+        # signal that just ended, which is exactly what an on_close handler needs. Kept as
+        # attributes rather than extra callback arguments because the three-argument
+        # on_close(duration, peak_rms, avg_rms) contract has nine call sites.
+        # 在回调之前赋值, 且回调之后仍然保留: 它们描述的是刚结束的这段信号,
+        # 正是 on_close 处理函数需要的东西。做成属性而不是加回调参数,
+        # 是因为 on_close(duration, peak_rms, avg_rms) 这个三参数约定有九处调用方。
+        self.last_peak_smeter_dbm = self._peak_smeter
+        self.last_avg_smeter_dbm = (self._smeter_sum / self._smeter_n
+                                    if self._smeter_n else None)
 
         self.is_open = False
 
@@ -427,8 +475,13 @@ class SquelchDetector:
         if self._on_close:
             self._on_close(duration, peak_rms, avg_rms)
 
-        # 重置
+        # 重置 (last_*_smeter_dbm 不在此列 —— 它们描述刚结束的信号, 要留给调用方读)
+        # (last_*_smeter_dbm are deliberately not reset -- they describe the signal that
+        #  just ended and the caller still has to read them)
         self._peak_rms = 0.0
+        self._peak_smeter = None
+        self._smeter_sum = 0.0
+        self._smeter_n = 0
         self._rms_history.clear()
         self._pre_roll_blocks.clear()
         self._pre_roll_total_samples = 0

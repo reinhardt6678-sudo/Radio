@@ -413,7 +413,11 @@ class SignalReceiver:
                     duration_seconds=signal_duration,
                     peak_rms=peak_rms,
                     avg_rms=avg_rms,
-                    s_meter_dbm=client.smeter,
+                    # 信号期间的峰值, 不是 client.smeter —— 后者此刻已经掉回底噪。
+                    # The peak measured while the signal was up, not client.smeter --
+                    # by now that has fallen back to the noise floor.
+                    s_meter_dbm=squelch.last_peak_smeter_dbm,
+                    s_meter_avg_dbm=squelch.last_avg_smeter_dbm,
                     recording_path=rec_info["path"] if rec_info else None,
                     description=freq.description,
                     network=freq.network,
@@ -588,7 +592,9 @@ class SignalReceiver:
                             frequency_khz=f.freq_khz, mode=f.mode,
                             node_host=host, node_name=node_name,
                             duration_seconds=dur, peak_rms=peak, avg_rms=avg,
-                            s_meter_dbm=client.smeter,
+                            # 同上: 取信号期间的峰值 / same as above: the in-signal peak
+                            s_meter_dbm=squelch.last_peak_smeter_dbm,
+                            s_meter_avg_dbm=squelch.last_avg_smeter_dbm,
                             recording_path=rec_info["path"] if rec_info else None,
                             description=f.description, network=f.network,
                         )
